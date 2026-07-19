@@ -460,6 +460,16 @@
           .filter(function (s) { return s.ch.lenFrames > 0 && (s.ch.state === 'playing' || s.ch.state === 'stopped'); })
           .map(function (s) { return { id: s.ch.id, label: 'LOOP ' + (strips.indexOf(s) + 1), gate: s.ch.songGain, ch: s.ch }; });
       },
+      automationTracks: function () {
+        var out = [];
+        strips.forEach(function (s, i) {
+          out = out.concat(s.ch.rack.songAutomationTracks('LOOP ' + (i + 1)));
+        });
+        out = out.concat(drums.fxRack.songAutomationTracks('DRUMS'));
+        out = out.concat(bass.fxRack.songAutomationTracks('303'));
+        out = out.concat(prizm.fxRack.songAutomationTracks('PRIZM'));
+        return out;
+      },
       setDrums: setDrumsOn,
       setBass: setBassOn,
       status: status

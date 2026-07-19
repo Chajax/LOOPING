@@ -38,6 +38,10 @@
   }
 
   function beatsToSec(div, bpm) { return RATE_BEATS[div] * 60 / bpm; }
+  function autoBars(len) {
+    var beats = RATE_BEATS[len] || 4;
+    return Math.max(1, Math.round(beats / 4));
+  }
 
   /* ---------------- effect definitions ---------------- */
   window.FX_DEFS = {
@@ -306,6 +310,7 @@
   var racks = [];
   var ticker = null;
   var TICK_MS = 16;             // ~60 Hz control rate + lane playhead refresh
+  var nextRackId = 1;
 
   /* Continuous musical phase in beats. Bar-locked while the transport runs (so
      sweeps land on bar lines), free-running from the same value when it stops —
@@ -340,9 +345,41 @@
           var p = entry.def.params[pi];
           if (p.type === 'select') continue;
           var a = entry.autos[p.id];
-          if (!a || !a.on) continue;
+          if (!a) continue;
           var cyc = RATE_BEATS[a.len] || 4;
           var ph = ((beats / cyc) % 1 + 1) % 1;
+
+          if (a.rec) {
+            var rel = (beats - a.recStartBeat) / cyc;
+            var recNorm = normOf(p, entry.values[p.id]);
+            var ridx = Math.round(ph * (AUTO_N - 1));
+            if (a.recLastIdx >= 0 && ridx !== a.recLastIdx) {
+              var lo = Math.min(ridx, a.recLastIdx), hi = Math.max(ridx, a.recLastIdx);
+              for (var rk = lo; rk <= hi; rk++) {
+                var rf = (rk - a.recLastIdx) / (ridx - a.recLastIdx);
+                a.pts[rk] = a.recLastNorm + (recNorm - a.recLastNorm) * rf;
+              }
+            } else {
+              a.pts[ridx] = recNorm;
+            }
+            a.recLastIdx = ridx;
+            a.recLastNorm = recNorm;
+            if (rel >= 1) {
+              a.rec = false;
+              if (a.recBtn) a.recBtn.classList.remove('on');
+            }
+            if (showNow) {
+              if (a.cctx) drawLane(a, ph);
+              if (entry.outEls && entry.outEls[p.id]) entry.outEls[p.id].textContent = fmtVal(p, entry.values[p.id]);
+            }
+            continue;
+          }
+
+          if (!a.on || a.songForce === false) {
+            if (showNow && a.cctx) drawLane(a, ph);
+            continue;
+          }
+
           // sample the drawn curve (linear interpolation between points)
           var fidx = ph * AUTO_N;
           var i0 = Math.floor(fidx) % AUTO_N, i1 = (i0 + 1) % AUTO_N, fr = fidx - Math.floor(fidx);
@@ -360,6 +397,8 @@
 
   function FxRack(engine) {
     this.engine = engine;
+    this.id = nextRackId++;
+    this._nextFxUid = 1;
     this.input = engine.ctx.createGain();
     this.output = engine.ctx.createGain();
     this.input.connect(this.output);
@@ -380,10 +419,17 @@
       if (p.type !== 'select' && p.auto !== false) {
         var pts = new Float32Array(AUTO_N);
         pts.fill(normOf(p, p.def));   // starts flat at the slider's value
-        autos[p.id] = { on: false, len: '1/1', pts: pts, canvas: null, cctx: null };
+        autos[p.id] = {
+          on: false, len: '1/1', pts: pts, canvas: null, cctx: null,
+          songForce: null, rec: false, recStartBeat: 0, recLastIdx: -1, recLastNorm: 0,
+          recBtn: null
+        };
       }
     });
-    var entry = { key: key, def: def, inst: inst, values: values, autos: autos, card: null, outEls: {} };
+    var entry = {
+      key: key, uid: this._nextFxUid++, def: def, inst: inst,
+      values: values, autos: autos, card: null, outEls: {}
+    };
     this.fx.push(entry);
     this.rebuild();
     if (this.listEl) this.buildCard(entry);
@@ -417,6 +463,64 @@
     this.output.disconnect();
     var i = racks.indexOf(this);
     if (i >= 0) racks.splice(i, 1);
+  };
+
+  FxRack.prototype._findAuto = function (laneId) {
+    for (var fi = 0; fi < this.fx.length; fi++) {
+      var e = this.fx[fi];
+      for (var pi = 0; pi < e.def.params.length; pi++) {
+        var p = e.def.params[pi];
+        if (p.type === 'select') continue;
+        var id = this.id + ':' + e.uid + ':' + p.id;
+        if (id === laneId) return { entry: e, param: p, auto: e.autos[p.id] };
+      }
+    }
+    return null;
+  };
+
+  FxRack.prototype.songAutomationTracks = function (prefix) {
+    var out = [];
+    for (var fi = 0; fi < this.fx.length; fi++) {
+      var e = this.fx[fi];
+      for (var pi = 0; pi < e.def.params.length; pi++) {
+        var p = e.def.params[pi];
+        if (p.type === 'select') continue;
+        var a = e.autos[p.id];
+        if (!a || !a.on) continue;
+        var laneId = this.id + ':' + e.uid + ':' + p.id;
+        out.push({
+          id: laneId,
+          label: prefix + ' · ' + e.def.name + ' · ' + p.label,
+          loopBars: autoBars(a.len),
+          apply: this.songSetAutomationActive.bind(this, laneId),
+          reset: this.songReleaseAutomation.bind(this, laneId)
+        });
+      }
+    }
+    return out;
+  };
+
+  FxRack.prototype.songSetAutomationActive = function (laneId, on) {
+    var hit = this._findAuto(laneId);
+    if (!hit || !hit.auto) return;
+    var a = hit.auto;
+    a.songForce = on ? true : false;
+    if (!on) {
+      a.rec = false;
+      if (a.recBtn) a.recBtn.classList.remove('on');
+      hit.entry.inst.set(hit.param.id, hit.entry.values[hit.param.id]);
+      if (hit.entry.outEls && hit.entry.outEls[hit.param.id]) {
+        hit.entry.outEls[hit.param.id].textContent = fmtVal(hit.param, hit.entry.values[hit.param.id]);
+      }
+    }
+  };
+
+  FxRack.prototype.songReleaseAutomation = function (laneId) {
+    var hit = this._findAuto(laneId);
+    if (!hit || !hit.auto) return;
+    hit.auto.songForce = null;
+    hit.auto.rec = false;
+    if (hit.auto.recBtn) hit.auto.recBtn.classList.remove('on');
   };
 
   /* ---------------- rack UI ---------------- */
@@ -540,7 +644,34 @@
           a.pts.fill(normOf(p, entry.values[p.id]));
           if (a.cctx) drawLane(a, -1);
         });
+        var rec = document.createElement('button');
+        rec.textContent = 'rec';
+        rec.title = 'Record one automation cycle from slider movement';
+        rec.addEventListener('click', function () {
+          a.on = true;
+          ab.classList.add('on');
+          arow.classList.remove('hidden');
+          val.classList.add('auto-live');
+          if (!a.cctx) {
+            canvas.width = canvas.clientWidth || 200;
+            a.cctx = canvas.getContext('2d');
+          }
+          a.rec = !a.rec;
+          if (a.rec) {
+            var t = self.engine.transport;
+            var beats = currentBeats(t);
+            a.recStartBeat = beats;
+            a.recLastIdx = -1;
+            a.recLastNorm = normOf(p, entry.values[p.id]);
+            rec.classList.add('on');
+          } else {
+            rec.classList.remove('on');
+          }
+          drawLane(a, -1);
+        });
+        a.recBtn = rec;
         bar.appendChild(lsel); bar.appendChild(flat);
+        bar.appendChild(rec);
         arow.appendChild(bar);
 
         var canvas = document.createElement('canvas');
@@ -578,6 +709,11 @@
 
         ab.addEventListener('click', function () {
           a.on = !a.on;
+          if (!a.on) {
+            a.rec = false;
+            if (a.recBtn) a.recBtn.classList.remove('on');
+            a.songForce = null;
+          }
           ab.classList.toggle('on', a.on);
           arow.classList.toggle('hidden', !a.on);
           val.classList.toggle('auto-live', a.on);

@@ -424,6 +424,12 @@ body {
   border-radius: 3px; font-size: 0.6rem; padding: 0.05rem 0.4rem; cursor: pointer;
 }
 .fx-auto-bar button:hover { color: var(--queued); border-color: var(--queued); }
+.fx-auto-bar button.on {
+  color: #2a0707;
+  background: var(--rec);
+  border-color: var(--rec);
+  font-weight: 700;
+}
 .fx-auto-lane {
   width: 100%; height: 46px; display: block;
   border: 1px solid var(--edge); border-radius: 4px;

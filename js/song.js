@@ -7,7 +7,7 @@
 
   var GUTTER = 78, RULER = 16;
   var ROW_H = 26, CELL_W = 20;          // zoomable
-  var COLORS = { loop: '#4da3ff', drums: '#ffa229', bass: '#3ddc84' };
+  var COLORS = { loop: '#4da3ff', drums: '#ffa229', bass: '#3ddc84', auto: '#b58cff' };
 
   var ui = null;
   var ctx = null;           // { engine, drums, bass, drumsGate, bassGate, loopTracks, setDrums, setBass, status }
@@ -42,6 +42,21 @@
     });
     addSlotLanes(ctx.drums, 'drums', 'DRUMS', COLORS.drums);
     addSlotLanes(ctx.bass, 'bass', '303', COLORS.bass);
+    if (ctx.automationTracks) {
+      ctx.automationTracks().forEach(function (at) {
+        tracks.push({
+          key: 'auto:' + at.id,
+          label: at.label,
+          kind: 'auto',
+          color: COLORS.auto,
+          cells: cellsFor('auto:' + at.id),
+          loopBars: Math.max(1, at.loopBars || 1),
+          apply: at.apply,
+          reset: at.reset,
+          _lastOn: null
+        });
+      });
+    }
   }
 
   /* One lane per pattern slot that has content (plus the current slot), so different
@@ -76,7 +91,7 @@
         '<label class="chk"><input type="checkbox" class="song-loop"> loop song</label>' +
         '<button class="song-clear">CLEAR</button>' +
         '<span class="song-zoom"><button class="song-zo" title="Smaller">–</button><button class="song-zi" title="Bigger">+</button></span>' +
-        '<span class="hint">paint bars per track · loops play in phase, drums/303 swap patterns per bar</span>' +
+        '<span class="hint">paint bars per track · audio loops, automation clips, and drums/303 pattern swaps stay bar-locked</span>' +
       '</div>' +
       '<div class="song-scroll"><canvas class="song-canvas"></canvas></div>';
     document.body.insertBefore(panel, document.getElementById('channels'));
@@ -126,7 +141,7 @@
        loop from bar 1 (which also keeps it phase-aligned on playback). */
     function setCell(row, bar, val) {
       var tr = tracks[row];
-      if (tr.kind === 'loop' && tr.loopBars > 1) {
+      if (tr.loopBars > 1) {
         var start = Math.floor(bar / tr.loopBars) * tr.loopBars;
         for (var b = start; b < start + tr.loopBars && b < bars; b++) tr.cells[b] = val;
         return;
@@ -140,7 +155,7 @@
       }
     }
     function blockActive(tr, bar) {
-      if (tr.kind === 'loop' && tr.loopBars > 1) {
+      if (tr.loopBars > 1) {
         return tr.cells[Math.floor(bar / tr.loopBars) * tr.loopBars];
       }
       return tr.cells[bar];
@@ -197,7 +212,7 @@
       g.font = '10px sans-serif';
       g.fillText(t.label, 6, y + ROW_H / 2 + 3);
       // clips
-      var lb = (t.kind === 'loop' && t.loopBars > 1) ? t.loopBars : 1;
+      var lb = t.loopBars > 1 ? t.loopBars : 1;
       for (var bi = 0; bi < bars; ) {
         if (t.cells[bi]) {
           // extent of this contiguous active run
@@ -312,6 +327,26 @@
     return slot < 0 ? null : ctx.bass.patterns[slot];
   }
 
+  function autoOnAtBar(t, bar) {
+    if (bar < 0 || bar >= bars) return false;
+    if (t.loopBars > 1) {
+      return !!t.cells[Math.floor(bar / t.loopBars) * t.loopBars];
+    }
+    return !!t.cells[bar];
+  }
+
+  function refreshAutomation(frame) {
+    var bar = barForFrame(frame);
+    for (var i = 0; i < tracks.length; i++) {
+      var t = tracks[i];
+      if (t.kind !== 'auto' || !t.apply) continue;
+      var on = autoOnAtBar(t, bar);
+      if (t._lastOn === on) continue;
+      t._lastOn = on;
+      t.apply(on);
+    }
+  }
+
   /* Schedule the loop-audio gates for one pass; re-armed each pass while looping. */
   function armLoopPass(sf) {
     tracks.forEach(function (t) {
@@ -320,6 +355,7 @@
         scheduleGate(t.gate, t.cells, sf);
       }
     });
+    refreshAutomation(sf);
     var sr = ctx.engine.ctx.sampleRate;
     var bf = ctx.engine.transport.barFrames();
     var msToEnd = ((sf + bars * bf) / sr - ctx.engine.ctx.currentTime) * 1000;
@@ -354,6 +390,10 @@
     if (anyBass) { ctx.setBass(true); ctx.bass.songSource = bassSource; ctx.bass.schedFrom = startF - 1; }
     else { ctx.setBass(false); ctx.bass.songSource = null; }
 
+    tracks.forEach(function (tr) {
+      if (tr.kind === 'auto') tr._lastOn = null;
+    });
+
     armLoopPass(startF);
     ctx.status('Playing song (' + bars + ' bars' + (loopSong ? ', looping' : '') + ').');
     if (!rafOn) { rafOn = true; requestAnimationFrame(frame); }
@@ -369,6 +409,10 @@
         t.gate.gain.cancelScheduledValues(now);
         t.gate.gain.setTargetAtTime(1, now, 0.01);
       }
+      if (t.kind === 'auto') {
+        t._lastOn = null;
+        if (t.reset) t.reset();
+      }
     });
     ctx.drums.songSource = null;
     ctx.bass.songSource = null;
@@ -381,6 +425,7 @@
 
   function frame() {
     if (!playing) { rafOn = false; render(); return; }
+    refreshAutomation(ctx.engine.transport.nowFrame());
     render();
     requestAnimationFrame(frame);
   }
