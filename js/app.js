@@ -176,6 +176,31 @@
       if (isFinite(v) && v >= 0.3) engine.autoEndSec = v;
     });
 
+    $('calibrate-btn').addEventListener('click', function () {
+      var btn = this;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      var prev = btn.textContent;
+      btn.textContent = '…';
+      status('Calibrating latency — playing test clicks. Patch output→input (loopback) or hold the mic to the speaker.');
+      engine.calibrateLatency({}, function (res) {
+        btn.disabled = false;
+        btn.textContent = prev;
+        if (res.fail) {
+          status('Calibration failed — no click detected. Set up a loopback (output→input, or mic near speaker) and try again.' +
+            (res.error ? ' (' + res.error + ')' : ''));
+          return;
+        }
+        var ms = Math.max(0, Math.min(200, Math.round(res.ms)));
+        engine.setComp(ms);
+        $('comp-input').value = ms;
+        var spread = res.all && res.all.length > 1 ?
+          (Math.max.apply(null, res.all) - Math.min.apply(null, res.all)) / engine.ctx.sampleRate * 1000 : 0;
+        status('Calibrated: round-trip latency ' + ms + ' ms (Comp set)' +
+          (spread > 3 ? ' — readings varied ±' + Math.round(spread / 2) + ' ms, re-run for a tighter result.' : '.'));
+      });
+    });
+
     $('midiout-select').addEventListener('change', function () {
       midi.setOutput(this.value);
       status(this.value ? 'MIDI clock output: ' + this.options[this.selectedIndex].text : 'MIDI clock output off.');

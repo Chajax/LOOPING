@@ -329,7 +329,67 @@
     '    return true;',
     '  }',
     '}',
-    'registerProcessor("looper-processor", LooperProcessor);'
+    'registerProcessor("looper-processor", LooperProcessor);',
+    '',
+    '// Latency calibration: emit a click, detect its loopback return; delay = round trip.',
+    'class CalibProcessor extends AudioWorkletProcessor {',
+    '  constructor() {',
+    '    super();',
+    '    this.state = "idle";',
+    '    this.pulseLen = Math.max(1, Math.round(sampleRate * 0.0015));',
+    '    this.preroll = Math.round(sampleRate * 0.18);',
+    '    this.window = Math.round(sampleRate * 0.4);',
+    '    this.guard = Math.round(sampleRate * 0.001);',
+    '    this.threshold = 0.06;',
+    '    this.maxTrials = 6;',
+    '    this.results = [];',
+    '    this.trial = 0;',
+    '    var self = this;',
+    '    this.port.onmessage = function (e) {',
+    '      if (e.data.cmd === "start") {',
+    '        self.threshold = e.data.threshold || 0.06;',
+    '        self.maxTrials = e.data.trials || 6;',
+    '        self.results = []; self.trial = 0; self.arm();',
+    '      } else if (e.data.cmd === "stop") { self.state = "idle"; }',
+    '    };',
+    '  }',
+    '  arm() {',
+    '    this.emitFrame = currentFrame + this.preroll;',
+    '    this.emitEnd = this.emitFrame + this.pulseLen;',
+    '    this.detectStart = this.emitEnd + this.guard;',
+    '    this.detectEnd = this.emitFrame + this.window;',
+    '    this.detected = false; this.detectedDelay = 0;',
+    '    this.state = "running";',
+    '  }',
+    '  process(inputs, outputs) {',
+    '    var out = outputs[0]; var o0 = out[0]; var o1 = out[1] || out[0];',
+    '    var inp = inputs[0]; var in0 = inp && inp[0] ? inp[0] : null;',
+    '    var N = o0.length, z;',
+    '    if (this.state === "running" && (this.detected || currentFrame >= this.detectEnd)) {',
+    '      if (this.detected) this.results.push(this.detectedDelay);',
+    '      this.trial++;',
+    '      if (this.trial >= this.maxTrials) { this.finish(); }',
+    '      else { this.arm(); }',
+    '    }',
+    '    if (this.state !== "running") { for (z = 0; z < N; z++) { o0[z] = 0; o1[z] = 0; } return true; }',
+    '    for (var j = 0; j < N; j++) {',
+    '      var f = currentFrame + j;',
+    '      var s = (f >= this.emitFrame && f < this.emitEnd) ? 0.5 : 0;',
+    '      o0[j] = s; o1[j] = s;',
+    '      if (!this.detected && in0 && f >= this.detectStart && f < this.detectEnd) {',
+    '        if (Math.abs(in0[j]) > this.threshold) { this.detected = true; this.detectedDelay = f - this.emitFrame; }',
+    '      }',
+    '    }',
+    '    return true;',
+    '  }',
+    '  finish() {',
+    '    this.state = "idle";',
+    '    if (!this.results.length) { this.port.postMessage({ ev: "fail" }); return; }',
+    '    var r = this.results.slice().sort(function (a, b) { return a - b; });',
+    '    this.port.postMessage({ ev: "done", frames: r[Math.floor(r.length / 2)], all: this.results });',
+    '  }',
+    '}',
+    'registerProcessor("calib-processor", CalibProcessor);'
   ].join('\n');
 
   /* ---------------- transport: musical grid + tempo ---------------- */
@@ -727,6 +787,44 @@
   Engine.prototype.setMasterVolume = function (v) {
     this.masterGain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.01);
   };
+  /* Measure round-trip latency by looping a click back through the input. Needs a
+     loopback (interface output patched to its input, or mic near the speaker).
+     Calls onResult({ ms, frames }) or ({ fail:true }). */
+  Engine.prototype.calibrateLatency = function (opts, onResult) {
+    var ctx = this.ctx, self = this;
+    var node;
+    try {
+      node = new AudioWorkletNode(ctx, 'calib-processor', {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2]
+      });
+    } catch (e) { onResult({ fail: true, error: 'worklet: ' + e.message }); return; }
+    var prevMonitor = this.monitorGain.gain.value;
+    this.monitorGain.gain.setValueAtTime(0, ctx.currentTime);   // avoid a feedback path
+    this.inputNode.connect(node);
+    node.connect(ctx.destination);
+    var done = false;
+    var cleanup = function () {
+      if (done) return; done = true;
+      try { self.inputNode.disconnect(node); } catch (e) {}
+      try { node.disconnect(); } catch (e) {}
+      self.monitorGain.gain.setValueAtTime(prevMonitor, ctx.currentTime);
+    };
+    node.port.onmessage = function (e) {
+      var m = e.data;
+      if (m.ev === 'done') {
+        cleanup();
+        var frames = m.frames;
+        var ms = frames / ctx.sampleRate * 1000;
+        onResult({ frames: frames, ms: ms, all: m.all });
+      } else if (m.ev === 'fail') {
+        cleanup();
+        onResult({ fail: true });
+      }
+    };
+    setTimeout(function () { if (!done) { cleanup(); onResult({ fail: true, error: 'timeout' }); } }, 6000);
+    node.port.postMessage({ cmd: 'start', trials: (opts && opts.trials) || 6, threshold: (opts && opts.threshold) || 0.06 });
+  };
+
   Engine.prototype.setComp = function (ms) {
     this.compFrames = Math.round(ms / 1000 * this.ctx.sampleRate);
     this.channels.forEach(function (c) { c.setComp(this.compFrames); }, this);

@@ -274,6 +274,10 @@ trigger on note-on or CC > 63.
 - **Comp (ms)** — latency compensation: shifts recorded/overdubbed audio earlier so it
   lands where you *heard* it, not where it arrived. The default is estimated from the
   audio output latency; if overdubs feel consistently late, raise it (try 20–40 ms).
+  **CAL** auto-calibrates it: patch your interface output to its input (a loopback
+  cable), or hold the mic close to the speaker, and click CAL — it plays a few test
+  clicks, measures the round-trip delay from the loopback, and sets Comp to the
+  median. It reports the spread and suggests a re-run if the readings were noisy.
 - **STOP ALL** stops playback but keeps the MIDI clock running (synth stays in sync).
   **RESET** clears everything, unlocks the tempo, and sends MIDI Stop.
 

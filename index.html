@@ -11,7 +11,7 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
   location.replace('https:' + location.href.slice(5));
 }
 </script>
-<link rel="stylesheet" href="css/style.css?v=11">
+<link rel="stylesheet" href="css/style.css?v=12">
 </head>
 <body>
 
@@ -101,6 +101,7 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
     <label>Comp</label>
     <input type="number" id="comp-input" min="0" max="200" step="1" value="0" title="Overdub latency compensation (ms)">
     <span class="unit">ms</span>
+    <button id="calibrate-btn" title="Auto-calibrate latency: plays test clicks and measures the round trip. Patch your interface output to its input (loopback), or place the mic close to the speaker.">CAL</button>
   </div>
 
   <div class="tb-group">
@@ -204,18 +205,18 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
   <span class="keys">Keys: 1–9 = loop button · Shift+1–9 = stop · N = add loop · P = play all · Space = stop all · D = drums · B = 303</span>
 </footer>
 
-<script src="js/effects.js?v=11"></script>
-<script src="js/engine.js?v=11"></script>
-<script src="js/midi.js?v=11"></script>
-<script src="js/drums.js?v=11"></script>
-<script src="js/bass303.js?v=11"></script>
-<script src="js/prizm.js?v=11"></script>
-<script src="js/export.js?v=11"></script>
-<script src="js/import.js?v=11"></script>
-<script src="js/editor.js?v=11"></script>
-<script src="js/sequencer.js?v=11"></script>
-<script src="js/slicer.js?v=11"></script>
-<script src="js/song.js?v=11"></script>
-<script src="js/app.js?v=11"></script>
+<script src="js/effects.js?v=12"></script>
+<script src="js/engine.js?v=12"></script>
+<script src="js/midi.js?v=12"></script>
+<script src="js/drums.js?v=12"></script>
+<script src="js/bass303.js?v=12"></script>
+<script src="js/prizm.js?v=12"></script>
+<script src="js/export.js?v=12"></script>
+<script src="js/import.js?v=12"></script>
+<script src="js/editor.js?v=12"></script>
+<script src="js/sequencer.js?v=12"></script>
+<script src="js/slicer.js?v=12"></script>
+<script src="js/song.js?v=12"></script>
+<script src="js/app.js?v=12"></script>
 </body>
 </html>
