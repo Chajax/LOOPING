@@ -117,6 +117,7 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
   <div class="tb-group buttons">
     <button id="drums-btn" title="Show/hide the 808 drum machine (D)">DRUMS</button>
     <button id="bass-btn" title="Show/hide the TB-303 bass synth (B)">303</button>
+    <button id="prizm-btn" title="Show/hide the PRIZM-2 dual refraction synth">PRIZM</button>
     <button id="midi-learn-btn" title="Toggle MIDI learn mode">MIDI LEARN</button>
     <button id="playall-btn" data-mappable="global:playAll" title="Resume all stopped loops together (P)">PLAY ALL</button>
     <button id="stopall-btn" data-mappable="global:stopAll">STOP ALL</button>
@@ -173,6 +174,18 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
   <div id="bass-grid"></div>
 </section>
 
+<section id="prizm-panel" class="hidden">
+  <div class="drum-head">
+    <span class="drum-title prizm-title">PRIZM-2</span>
+    <label class="chk" title="Play PRIZM from incoming (unmapped) MIDI notes, velocity-sensitive"><input type="checkbox" id="prizm-midi-in" checked> MIDI in</label>
+    <label class="chk" title="Route PRIZM into the loop input bus so loop channels record it (latency-compensated)"><input type="checkbox" id="prizm-to-looper"> → looper</label>
+    <label>Vol</label>
+    <input type="range" id="prizm-vol" min="0" max="1.2" step="0.01" value="0.72">
+    <span class="hint">dual refraction synth · keys A W S E D F … + Z/X octave while open · n = 1 harmonic rainbow, n ≠ 1 inharmonic glass</span>
+  </div>
+  <div id="prizm-ui"></div>
+</section>
+
 <main id="channels" class="hidden"></main>
 
 <button id="add-channel" class="hidden" data-mappable="global:addChannel" title="Add a new loop channel (N)">＋ ADD LOOP</button>
@@ -187,6 +200,7 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
 <script src="js/midi.js"></script>
 <script src="js/drums.js"></script>
 <script src="js/bass303.js"></script>
+<script src="js/prizm.js"></script>
 <script src="js/export.js"></script>
 <script src="js/import.js"></script>
 <script src="js/editor.js"></script>

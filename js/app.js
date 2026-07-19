@@ -6,6 +6,7 @@
   var midi = null;
   var drums = null;
   var bass = null;
+  var prizm = null;
   var strips = [];           // parallel to engine.channels: { ch, root, els }
   var RING_C = 2 * Math.PI * 50;
 
@@ -53,6 +54,10 @@
       bass = new window.Bass303(engine);
       bass.mountUI($('bass-grid'));
       wireBass();
+
+      prizm = new window.Prizm(engine);
+      prizm.buildUI($('prizm-panel'), $('prizm-ui'));
+      wirePrizm();
 
       powerMsg('Requesting microphone access — answer the browser prompt…');
       try {
@@ -218,6 +223,7 @@
         bass.silence();
         $('bass-toggle').classList.remove('active');
       }
+      if (prizm) prizm.allOff();
       $('bpm-input').disabled = false;
       status('Reset: loops cleared, tempo unlocked, clock stopped.');
       strips.forEach(function (s) { refreshStrip(s); });
@@ -344,6 +350,26 @@
     $('bass-clear').addEventListener('click', function () {
       bass.clearPattern();
       status('303 pattern cleared.');
+    });
+  }
+
+  /* ---------------- PRIZM synth ---------------- */
+  function wirePrizm() {
+    $('prizm-btn').addEventListener('click', function () {
+      $('prizm-panel').classList.toggle('hidden');
+    });
+    $('prizm-midi-in').addEventListener('change', function () {
+      prizm.midiIn = this.checked;
+      if (!this.checked) prizm.allOff();
+    });
+    $('prizm-to-looper').addEventListener('change', function () {
+      prizm.setLoopRoute(this.checked);
+      status(this.checked ?
+        'PRIZM routed into the loop input bus — loop channels now record it.' :
+        'PRIZM plays to the master output only.');
+    });
+    $('prizm-vol').addEventListener('input', function () {
+      prizm.setVolume(parseFloat(this.value));
     });
   }
 
@@ -490,6 +516,12 @@
     midi.onRaw = function (data, timeStamp) {
       var frame = engine.perfToFrame(timeStamp) - engine.compFrames;
       var isNoteOn = (data[0] & 0xF0) === 0x90 && data[2] > 0;
+      if (prizm && prizm.midiIn) {
+        var hiP = data[0] & 0xF0;
+        if (isNoteOn) prizm.noteOn(data[1], data[2] / 127);
+        else if (hiP === 0x80 || hiP === 0x90) prizm.noteOff(data[1]);
+        else if (hiP === 0xB0 && data[1] === 123) prizm.allOff();
+      }
       if (isNoteOn) {
         strips.forEach(function (s, i) {
           var c = s.ch;
@@ -588,6 +620,8 @@
       if (e.repeat) return;
       var tag = document.activeElement && document.activeElement.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      // while the PRIZM panel is open its play-keys win over app shortcuts
+      if (prizm && prizm.isOpen() && prizm.handlesKey(e.key.toLowerCase())) return;
       if (e.code === 'Space') {
         e.preventDefault();
         stopEverything();

@@ -135,6 +135,19 @@ rebuilds the loop in place — same length, same grid anchor, 2 ms de-click fade
 every slice edge — and the result plays through the channel's FX chain, so slicing
 happens **before the effects**.
 
+### PRIZM-2 synth
+
+**PRIZM** (top bar) opens a dual "refraction" synthesizer: each of its two
+oscillators splits a note into up to 8 partial **rays** — ray k sits at
+base·(k+1)ⁿ (index *n* = 1 gives a harmonic series, n ≠ 1 inharmonic
+glass/bell tones), detuned by *dispersion*·k cents with a spectral *tilt* —
+through a lowpass **Aperture** and an **Exposure** ADSR, 8-voice polyphonic.
+Play it three ways: the on-screen keys, your computer keyboard (A W S E D F …,
+Z/X octave — active while the panel is open), or **MIDI in**
+(velocity-sensitive; any unmapped incoming note plays it). Tick **→ looper**
+to route PRIZM into the loop input bus — loop channels then record it
+directly, latency-compensated, so you can loop the synth without any cabling.
+
 ### MIDI sequencer (compose → record)
 
 **SEQ** on any channel opens a piano-roll sequencer (C2–C6, 16th-note grid, 1–8

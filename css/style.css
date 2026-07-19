@@ -180,6 +180,71 @@ body {
 .bass-head-cell.beat1 { background: #2c3140; }
 .bass-head-cell.now { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
 
+/* ---- PRIZM-2 synth ---- */
+#prizm-panel {
+  background: var(--panel);
+  border-bottom: 1px solid var(--edge);
+  padding: 0.6rem 0.9rem;
+}
+.prizm-title {
+  background: linear-gradient(90deg, #ff3b30, #ff9500, #ffd60a, #34c759, #32ade6, #5856d6, #af52de);
+  -webkit-background-clip: text; background-clip: text; color: transparent !important;
+  font-weight: 600;
+}
+#prizm-panel .drum-head input[type="range"] { accent-color: var(--queued); }
+#prizm-ui { display: flex; flex-direction: column; gap: 0.6rem; }
+.pz-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.6rem;
+}
+.pz-osc {
+  background: var(--panel-2); border: 1px solid var(--edge); border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+.pz-osc-title { font-size: 0.68rem; letter-spacing: 0.15em; color: var(--dim); margin-bottom: 0.4rem; }
+.pz-osc-a .pz-osc-title { color: #ffb454; }
+.pz-osc-b .pz-osc-title { color: #9d7bff; }
+.pz-waves { display: flex; gap: 0.3rem; margin-bottom: 0.4rem; }
+.pz-waves button {
+  font-size: 0.62rem; letter-spacing: 0.08em; padding: 0.2rem 0.5rem;
+  border-radius: 5px; border: 1px solid var(--edge);
+  background: var(--panel); color: var(--dim); cursor: pointer;
+}
+.pz-waves button.on { color: var(--text); border-color: var(--accent); background: #1a2436; }
+.pz-ctl {
+  display: grid; grid-template-columns: 5.2rem 1fr 3.4rem;
+  align-items: center; gap: 0.5rem; margin: 0.25rem 0;
+}
+.pz-ctl label { font-size: 0.66rem; color: var(--dim); letter-spacing: 0.05em; }
+.pz-ctl input { width: 100%; accent-color: var(--accent); }
+.pz-ctl output { font-size: 0.66rem; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.pz-kbd { background: var(--panel-2); border: 1px solid var(--edge); border-radius: 8px; padding: 0.5rem 0.7rem; }
+.pz-kbd-top {
+  display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+  font-size: 0.7rem; color: var(--dim); margin-bottom: 0.4rem;
+}
+.pz-kbd-top button {
+  background: var(--panel); border: 1px solid var(--edge); color: var(--dim);
+  border-radius: 5px; padding: 0.15rem 0.5rem; cursor: pointer; font-size: 0.68rem;
+}
+.pz-kbd-top button:hover { border-color: var(--accent); color: var(--text); }
+.pz-keys { position: relative; height: 96px; display: flex; border-radius: 6px; overflow: hidden; }
+.pz-key {
+  flex: 1; border: 1px solid #11131f; border-radius: 0 0 5px 5px;
+  background: linear-gradient(#f2f3f7, #d9dbe6); cursor: pointer; position: relative;
+}
+.pz-key.black {
+  position: absolute; width: 6.2%; height: 60%; z-index: 2;
+  background: linear-gradient(#2a2d3f, #14162a);
+  border: 1px solid #000; border-radius: 0 0 4px 4px;
+}
+.pz-key.held { background: linear-gradient(90deg, #ff9500, #ffd60a, #34c759, #32ade6); }
+.pz-key.black.held { filter: brightness(0.8); }
+.pz-key .kc {
+  position: absolute; bottom: 4px; left: 0; right: 0; text-align: center;
+  font-size: 0.6rem; color: #8a8fa8; pointer-events: none;
+}
+
 /* per-loop quantize override */
 .q-select {
   background: var(--panel-2); color: var(--dim);
