@@ -9,6 +9,7 @@ play all plays everything in synced          [DONE] PLAY ALL starts loops + 808 
 works on github pages without the server on port 8080   [FIXED - push + enable "Enforce HTTPS" in repo Settings->Pages] http visitors lacked mic/MIDI/AudioWorklet and errors were invisible; now auto-redirects to https and shows startup errors on the power screen
 
 options for custom drum sound import, and spawning more chanels as well as the option to create polyrythms
+                                             [DONE] +SAMPLE imports audio files as drum rows, +VOICE spawns extra synth rows (removable), per-row step count 2-32 creates polyrhythms with per-row playheads
 
 add automation to 303
 

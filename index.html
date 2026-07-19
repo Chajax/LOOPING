@@ -134,7 +134,17 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
     <label>Vol</label>
     <input type="range" id="drums-vol" min="0" max="1.5" step="0.01" value="0.9">
     <button id="drums-clear" title="Clear the whole pattern">CLEAR</button>
-    <span class="hint">16ths of the master bar · click instrument names to preview</span>
+    <select id="drum-add-type" title="Voice to add">
+      <option value="bd">Kick</option>
+      <option value="sd">Snare</option>
+      <option value="ch">Cl Hat</option>
+      <option value="oh">Op Hat</option>
+      <option value="cp">Clap</option>
+    </select>
+    <button id="drum-add-voice" title="Add another row of the selected synth voice">＋ VOICE</button>
+    <button id="drum-add-sample" title="Add a row that plays an imported audio file (wav/mp3/ogg)">＋ SAMPLE</button>
+    <input type="file" id="drum-sample-file" accept="audio/*" multiple style="display:none">
+    <span class="hint">16ths of the master bar · per-row step count ≠ 16 = polyrhythm · click names to preview</span>
   </div>
   <div id="drum-grid"></div>
 </section>

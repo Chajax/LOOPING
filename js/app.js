@@ -282,6 +282,30 @@
       drums.clearPattern();
       status('Drum pattern cleared.');
     });
+
+    $('drum-add-voice').addEventListener('click', function () {
+      var type = $('drum-add-type').value;
+      drums.addSynthRow(type);
+      status('Added a ' + $('drum-add-type').selectedOptions[0].text + ' row.');
+    });
+
+    $('drum-add-sample').addEventListener('click', function () {
+      $('drum-sample-file').click();
+    });
+    $('drum-sample-file').addEventListener('change', async function () {
+      var files = Array.from(this.files);
+      this.value = '';
+      for (var i = 0; i < files.length; i++) {
+        var f = files[i];
+        try {
+          var audio = await engine.ctx.decodeAudioData(await f.arrayBuffer());
+          drums.addSampleRow(f.name.replace(/\.[^.]+$/, ''), audio);
+          status('Added sample row "' + f.name + '" (' + audio.duration.toFixed(2) + 's).');
+        } catch (e) {
+          status('Could not decode "' + f.name + '": ' + e.message);
+        }
+      }
+    });
   }
 
   /* ---------------- TB-303 bass ---------------- */
@@ -340,9 +364,7 @@
   }
 
   function drumsHavePattern() {
-    return Object.keys(drums.pattern).some(function (inst) {
-      return drums.pattern[inst].some(Boolean);
-    });
+    return drums.hasPattern();
   }
   function bassHasPattern() {
     return bass.pattern.some(function (st) { return st.pitch !== null; });

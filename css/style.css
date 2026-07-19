@@ -111,6 +111,21 @@ body {
 .drum-head .hint { font-size: 0.7rem; color: var(--dim); margin-left: auto; }
 #drum-grid { display: flex; flex-direction: column; gap: 0.3rem; overflow-x: auto; }
 .drum-row { display: flex; align-items: center; gap: 0.25rem; }
+.drum-remove {
+  flex: none; background: none; border: none; color: var(--dim);
+  cursor: pointer; font-size: 0.7rem; padding: 0 0.15rem;
+}
+.drum-remove:hover { color: var(--rec); }
+.drum-steps {
+  width: 2.6rem; flex: none;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--edge); border-radius: 4px;
+  font-size: 0.68rem; padding: 0.15rem 0.2rem;
+}
+#drum-add-type {
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--edge); border-radius: 4px; padding: 0.2rem; font-size: 0.72rem;
+}
 .drum-label {
   width: 4.2rem; flex: none; text-align: left;
   background: none; border: 1px solid var(--edge); border-radius: 4px;

@@ -81,11 +81,19 @@ let one loop close on the beat.
 ### 808 drums
 
 **DRUMS** (top bar, or `D`) opens a built-in synthesized 808 kit — kick, snare,
-closed/open hat (closed chokes open, like the original), clap — with a 16-step
+closed/open hat (closed chokes open, like the original), clap — with a step
 sequencer running on 16ths of the master bar, phase-locked to the transport and the
-MIDI clock. Click steps to toggle, instrument names to preview, per-instrument levels
-plus a kit volume. **PLAY** starts the pattern — and starts the clock at the current
-BPM if nothing is running yet, so drums-first jamming works.
+MIDI clock. Click steps to toggle, instrument names to preview, per-row levels plus
+a kit volume. **PLAY** starts the pattern — and starts the clock at the current BPM
+if nothing is running yet, so drums-first jamming works.
+
+- **＋ VOICE** spawns another row of any synth voice (two kicks tuned by level, three
+  hats…); ✕ removes a row.
+- **＋ SAMPLE** imports audio files (wav/mp3/ogg, multi-select) as new drum rows —
+  your own hits play sample-accurately on the same grid.
+- **Polyrhythms**: each row has its own step count (2–32). A row with ≠16 steps
+  cycles at its own length against the others — e.g. a 12-step hat over a 16-step
+  kick realigns every 3 bars. Each row shows its own playhead.
 
 ### Waveform editor
 
