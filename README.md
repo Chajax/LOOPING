@@ -50,11 +50,13 @@ One shared FX rack powers the loop channels **and** the instrument buses — the
 follows BPM changes), **Reverb** (free decay or synced to 1/2…2 bars),
 **Distortion**, **Flanger**, **Chorus** — stack and order freely.
 
-Every knob has an **A** button: LFO automation around the slider's value — waveform
-(sine / tri / saw / square / random sample-&-hold), musical rate (1/16 … 4 bars,
-phase-locked to the transport so sweeps land on bar lines), and depth. Filter
-sweeps run in log-frequency space so they sound even across the range. The slider
-stays live as the automation's center while it runs.
+Every knob has an **A** button that opens a **drawable automation loop**: draw the
+parameter's movement freehand on the lane, pick a loop length (1/4 … 4 bars), and it
+plays back phase-locked to the transport with a moving playhead. The curve maps
+across the parameter's full range (log-frequency for filter cutoff, so it sounds
+even), and *flat* resets it to the current slider value. Draw a rising ramp on the
+filter cutoff for a riser, a stepped shape for rhythmic gating, anything you can
+draw — each parameter has its own independent loop.
 
 ### MIDI-triggered recording & MIDI loops
 

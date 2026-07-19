@@ -8,3 +8,4 @@ song build from loops feature
 
 
 click at start of recorded loops                [DONE] replaced fade-to-zero seam with tail crossfade: keeps ~15ms of post-loop input and blends it over the loop start -> seamless wrap, no dip on sustained tones
+

@@ -365,15 +365,22 @@ body {
   border-radius: 3px; font-size: 0.6rem; padding: 0 0.2rem; cursor: pointer; line-height: 1.3;
 }
 .fx-auto-btn.on { color: #120a20; background: var(--queued); border-color: var(--queued); font-weight: 700; }
-.fx-auto {
-  display: grid; grid-template-columns: auto auto 1fr;
-  gap: 0.3rem; align-items: center; margin: 0.1rem 0 0.3rem 4.5rem;
-}
-.fx-auto select {
+.fx-auto { margin: 0.15rem 0 0.4rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.fx-auto-bar { display: flex; align-items: center; gap: 0.3rem; }
+.fx-auto-bar select {
   background: var(--panel); color: var(--queued);
   border: 1px solid var(--edge); border-radius: 3px; font-size: 0.62rem; padding: 0.05rem;
 }
-.fx-auto input { width: 100%; accent-color: var(--queued); }
+.fx-auto-bar button {
+  background: var(--panel); color: var(--dim); border: 1px solid var(--edge);
+  border-radius: 3px; font-size: 0.6rem; padding: 0.05rem 0.4rem; cursor: pointer;
+}
+.fx-auto-bar button:hover { color: var(--queued); border-color: var(--queued); }
+.fx-auto-lane {
+  width: 100%; height: 46px; display: block;
+  border: 1px solid var(--edge); border-radius: 4px;
+  cursor: crosshair; touch-action: none; background: #14161a;
+}
 .fx-param .val.auto-live { color: var(--queued); font-weight: 600; }
 
 .fx-rack { display: flex; flex-direction: column; gap: 0.45rem; }

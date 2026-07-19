@@ -239,30 +239,73 @@
     }
   };
 
-  /* ---------------- automation ---------------- */
-  var AUTO_RATES = [['1/16', '1/16'], ['1/8', '1/8'], ['1/4', '1/4'], ['1/2', '1/2'],
-    ['1/1', '1 bar'], ['2/1', '2 bars'], ['4/1', '4 bars']];
+  /* ---------------- automation (drawable loops) ---------------- */
+  var LEN_OPTS = [['1/4', '1/4'], ['1/2', '1/2'], ['1/1', '1 bar'],
+    ['2/1', '2 bars'], ['4/1', '4 bars']];
+  var AUTO_N = 128;            // curve resolution (points across the loop)
 
-  function lfoVal(wave, ph, cycleIdx) {
-    switch (wave) {
-      case 'tri': return 1 - 4 * Math.abs(ph - 0.5);
-      case 'saw': return 2 * ph - 1;
-      case 'sqr': return ph < 0.5 ? 1 : -1;
-      case 'rnd':
-        var x = Math.sin(cycleIdx * 127.1 + 31.7) * 43758.5453;
-        return (x - Math.floor(x)) * 2 - 1;
-      default: return Math.sin(2 * Math.PI * ph);
-    }
+  /* value <-> normalized 0..1 across the param range (log-aware) */
+  function normOf(p, v) {
+    if (p.log) return (Math.log(v) - Math.log(p.min)) / (Math.log(p.max) - Math.log(p.min));
+    return (v - p.min) / (p.max - p.min);
+  }
+  function valOf(p, norm) {
+    norm = Math.max(0, Math.min(1, norm));
+    if (p.log) return Math.exp(Math.log(p.min) + norm * (Math.log(p.max) - Math.log(p.min)));
+    return p.min + norm * (p.max - p.min);
   }
 
   function fmtVal(p, v) {
     return (v >= 100 ? Math.round(v) : Math.round(v * 100) / 100) + (p.unit || '');
   }
 
+  /* Render an automation lane: the drawn curve, filled, with a moving playhead. */
+  function drawLane(a, ph) {
+    var c = a.canvas, g = a.cctx;
+    var W = c.width, H = c.height;
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = 'rgba(181,140,255,0.10)';
+    g.fillRect(0, 0, W, H);
+    // grid: quarters of the loop
+    g.strokeStyle = 'rgba(216,220,230,0.10)';
+    for (var q = 1; q < 4; q++) {
+      var gx = q / 4 * W;
+      g.beginPath(); g.moveTo(gx, 0); g.lineTo(gx, H); g.stroke();
+    }
+    // curve
+    g.beginPath();
+    for (var i = 0; i < AUTO_N; i++) {
+      var x = i / (AUTO_N - 1) * W;
+      var y = (1 - a.pts[i]) * H;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.lineTo(W, (1 - a.pts[AUTO_N - 1]) * H);
+    g.lineTo(W, H); g.lineTo(0, H); g.closePath();
+    g.fillStyle = 'rgba(181,140,255,0.28)';
+    g.fill();
+    g.strokeStyle = '#b58cff';
+    g.lineWidth = 1.4;
+    g.beginPath();
+    for (i = 0; i < AUTO_N; i++) {
+      var x2 = i / (AUTO_N - 1) * W, y2 = (1 - a.pts[i]) * H;
+      if (i === 0) g.moveTo(x2, y2); else g.lineTo(x2, y2);
+    }
+    g.stroke();
+    // playhead
+    if (ph >= 0) {
+      var px = ph * W;
+      g.strokeStyle = '#ffa229';
+      g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke();
+      var idx = Math.floor(ph * AUTO_N) % AUTO_N;
+      g.fillStyle = '#ffa229';
+      g.beginPath(); g.arc(px, (1 - a.pts[idx]) * H, 2.5, 0, 2 * Math.PI); g.fill();
+    }
+  }
+
   /* ---------------- FxRack ---------------- */
   var racks = [];
   var ticker = null;
-  var TICK_MS = 16;             // ~60 Hz control rate (smooth even on fast LFO rates)
+  var TICK_MS = 16;             // ~60 Hz control rate + lane playhead refresh
 
   /* Continuous musical phase in beats. Bar-locked while the transport runs (so
      sweeps land on bar lines), free-running from the same value when it stops —
@@ -298,21 +341,18 @@
           if (p.type === 'select') continue;
           var a = entry.autos[p.id];
           if (!a || !a.on) continue;
-          var cyc = RATE_BEATS[a.rate] || 4;
+          var cyc = RATE_BEATS[a.len] || 4;
           var ph = ((beats / cyc) % 1 + 1) % 1;
-          var lfo = lfoVal(a.wave, ph, Math.floor(beats / cyc));
-          var v;
-          if (p.log) {
-            var lmin = Math.log(p.min), lmax = Math.log(p.max);
-            var b0 = Math.log(entry.values[p.id]);
-            var span = (lmax - lmin) / 2 * a.depth;
-            v = Math.exp(Math.min(lmax, Math.max(lmin, b0 + lfo * span)));
-          } else {
-            var span2 = (p.max - p.min) / 2 * a.depth;
-            v = Math.min(p.max, Math.max(p.min, entry.values[p.id] + lfo * span2));
-          }
+          // sample the drawn curve (linear interpolation between points)
+          var fidx = ph * AUTO_N;
+          var i0 = Math.floor(fidx) % AUTO_N, i1 = (i0 + 1) % AUTO_N, fr = fidx - Math.floor(fidx);
+          var norm = a.pts[i0] * (1 - fr) + a.pts[i1] * fr;
+          var v = valOf(p, norm);
           entry.inst.set(p.id, v);
-          if (showNow && entry.outEls && entry.outEls[p.id]) entry.outEls[p.id].textContent = fmtVal(p, v);
+          if (showNow) {
+            if (entry.outEls && entry.outEls[p.id]) entry.outEls[p.id].textContent = fmtVal(p, v);
+            if (a.cctx) drawLane(a, ph);
+          }
         }
       }
     }
@@ -338,7 +378,9 @@
       values[p.id] = p.def;
       inst.set(p.id, p.def);
       if (p.type !== 'select' && p.auto !== false) {
-        autos[p.id] = { on: false, wave: 'sine', rate: '1/1', depth: 0.5 };
+        var pts = new Float32Array(AUTO_N);
+        pts.fill(normOf(p, p.def));   // starts flat at the slider's value
+        autos[p.id] = { on: false, len: '1/1', pts: pts, canvas: null, cctx: null };
       }
     });
     var entry = { key: key, def: def, inst: inst, values: values, autos: autos, card: null, outEls: {} };
@@ -473,43 +515,81 @@
         var ab = document.createElement('button');
         ab.className = 'fx-auto-btn';
         ab.textContent = 'A';
-        ab.title = 'Automate this parameter (LFO around the slider value)';
+        ab.title = 'Draw an automation loop for this parameter';
         row.appendChild(ab);
         card.appendChild(row);
 
         var arow = document.createElement('div');
         arow.className = 'fx-auto hidden';
-        var wsel = document.createElement('select');
-        [['sine', '∿ sine'], ['tri', '△ tri'], ['saw', '⩗ saw'], ['sqr', '⊓ sqr'], ['rnd', '⁘ rnd']].forEach(function (w) {
-          var o = document.createElement('option');
-          o.value = w[0]; o.textContent = w[1];
-          wsel.appendChild(o);
+
+        var bar = document.createElement('div');
+        bar.className = 'fx-auto-bar';
+        var lsel = document.createElement('select');
+        lsel.title = 'Loop length';
+        LEN_OPTS.forEach(function (o) {
+          var op = document.createElement('option');
+          op.value = o[0]; op.textContent = o[1];
+          lsel.appendChild(op);
         });
-        var rsel = document.createElement('select');
-        AUTO_RATES.forEach(function (r) {
-          var o = document.createElement('option');
-          o.value = r[0]; o.textContent = r[1];
-          rsel.appendChild(o);
+        lsel.value = a.len;
+        lsel.addEventListener('change', function () { a.len = this.value; });
+        var flat = document.createElement('button');
+        flat.textContent = 'flat';
+        flat.title = 'Reset the curve to the current slider value';
+        flat.addEventListener('click', function () {
+          a.pts.fill(normOf(p, entry.values[p.id]));
+          if (a.cctx) drawLane(a, -1);
         });
-        rsel.value = a.rate;
-        var dep = document.createElement('input');
-        dep.type = 'range';
-        dep.min = 0; dep.max = 1; dep.step = 0.01; dep.value = a.depth;
-        dep.title = 'Automation depth';
-        wsel.addEventListener('change', function () { a.wave = this.value; });
-        rsel.addEventListener('change', function () { a.rate = this.value; });
-        dep.addEventListener('input', function () { a.depth = parseFloat(this.value); });
+        bar.appendChild(lsel); bar.appendChild(flat);
+        arow.appendChild(bar);
+
+        var canvas = document.createElement('canvas');
+        canvas.className = 'fx-auto-lane';
+        canvas.height = 46;
+        arow.appendChild(canvas);
+        a.canvas = canvas;
+
+        // draw the curve by dragging across the lane
+        var drawing = false, lastIdx = -1, lastNorm = 0;
+        function paintAt(e) {
+          var rect = canvas.getBoundingClientRect();
+          var x = Math.min(Math.max(e.clientX - rect.left, 0), rect.width - 0.001);
+          var y = Math.min(Math.max(e.clientY - rect.top, 0), rect.height);
+          var idx = Math.round(x / rect.width * (AUTO_N - 1));
+          var norm = 1 - y / rect.height;
+          if (lastIdx >= 0 && idx !== lastIdx) {
+            var lo = Math.min(idx, lastIdx), hi = Math.max(idx, lastIdx);
+            for (var k = lo; k <= hi; k++) {
+              var f2 = (k - lastIdx) / (idx - lastIdx);
+              a.pts[k] = lastNorm + (norm - lastNorm) * f2;
+            }
+          } else {
+            a.pts[idx] = norm;
+          }
+          lastIdx = idx; lastNorm = norm;
+          drawLane(a, -1);
+        }
+        canvas.addEventListener('pointerdown', function (e) {
+          drawing = true; lastIdx = -1; canvas.setPointerCapture(e.pointerId); paintAt(e);
+        });
+        canvas.addEventListener('pointermove', function (e) { if (drawing) paintAt(e); });
+        canvas.addEventListener('pointerup', function () { drawing = false; lastIdx = -1; });
+        canvas.addEventListener('pointercancel', function () { drawing = false; lastIdx = -1; });
+
         ab.addEventListener('click', function () {
           a.on = !a.on;
           ab.classList.toggle('on', a.on);
           arow.classList.toggle('hidden', !a.on);
-          val.classList.toggle('auto-live', a.on);   // readout glows while automating
-          if (!a.on) {
+          val.classList.toggle('auto-live', a.on);
+          if (a.on) {
+            canvas.width = canvas.clientWidth || 200;
+            a.cctx = canvas.getContext('2d');
+            drawLane(a, -1);
+          } else {
             entry.inst.set(p.id, entry.values[p.id]);
             val.textContent = fmtVal(p, entry.values[p.id]);
           }
         });
-        arow.appendChild(wsel); arow.appendChild(rsel); arow.appendChild(dep);
         card.appendChild(arow);
       } else {
         row.appendChild(document.createElement('span'));
