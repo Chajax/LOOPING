@@ -541,6 +541,8 @@
         else if (hiP === 0x80 || hiP === 0x90) prizm.noteOff(data[1]);
         else if (hiP === 0xB0 && data[1] === 123) prizm.allOff();
       }
+      // step recording in an open sequencer consumes notes (skip arm-trigger/capture)
+      if (window.MidiSequencer && window.MidiSequencer.handleMidi(data)) return;
       if (isNoteOn) {
         strips.forEach(function (s, i) {
           var c = s.ch;

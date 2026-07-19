@@ -491,6 +491,13 @@ body.learn-mode [data-mappable] { outline: 2px dashed var(--queued); outline-off
 .seq-vel-val { min-width: 1.8rem; text-align: right; font-variant-numeric: tabular-nums; }
 .seq-loopout { font-size: 0.72rem; color: var(--dim); margin-left: 0.5rem; }
 .seq-rec { background: var(--rec) !important; color: #fff !important; border-color: var(--rec) !important; }
+.seq-step-group { display: inline-flex; gap: 0.25rem; margin-left: 0.4rem; }
+.seq-step-group button {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--edge);
+  border-radius: 5px; padding: 0.2rem 0.5rem; cursor: pointer; font-size: 0.72rem;
+}
+.seq-step-group button:hover { border-color: var(--play); }
+.seq-step.active { background: var(--play); color: #04200f; border-color: var(--play); font-weight: 700; }
 
 /* ---- tap tempo dialog ---- */
 #tap-overlay {

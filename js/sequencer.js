@@ -32,6 +32,8 @@
   var sess = null;      // active playback { mode:'preview'|'rec', startF, lenF, endF, schedFrom, closeSent }
   var pumpTimer = null;
   var rafOn = false;
+  // step recording: play notes on a MIDI keyboard to enter them at the cursor
+  var stepRec = { on: false, cursor: 0, held: [], entered: false };
 
   /* ---------------- pattern helpers ---------------- */
   function stepFrames(engine) { return engine.transport.barFrames() / 16; }
@@ -111,6 +113,11 @@
           '<label class="seq-l">Vel <input type="range" class="seq-vel" min="1" max="127" step="1" value="100"><span class="seq-vel-val">100</span></label>' +
           '<label class="chk seq-loopout" title="Keep sending the MIDI pattern every loop cycle after recording (the synth will double the recorded audio)">' +
             '<input type="checkbox"> loop MIDI out after rec</label>' +
+          '<span class="seq-step-group">' +
+            '<button class="seq-step" title="Step record: play notes on your MIDI keyboard to enter them at the cursor, one step at a time">STEP REC</button>' +
+            '<button class="seq-back" title="Step back and delete the note(s) there">⟵</button>' +
+            '<button class="seq-rest" title="Insert a rest (advance the cursor without a note)">REST</button>' +
+          '</span>' +
         '</div>' +
         '<canvas class="seq-canvas" height="392"></canvas>' +
         '<div class="editor-row editor-foot">' +
@@ -148,7 +155,10 @@
       noteLen: overlay.querySelector('.seq-notelen'),
       vel: overlay.querySelector('.seq-vel'),
       velVal: overlay.querySelector('.seq-vel-val'),
-      loopOut: overlay.querySelector('.seq-loopout input')
+      loopOut: overlay.querySelector('.seq-loopout input'),
+      stepBtn: overlay.querySelector('.seq-step'),
+      backBtn: overlay.querySelector('.seq-back'),
+      restBtn: overlay.querySelector('.seq-rest')
     };
 
     overlay.querySelector('.seq-close').addEventListener('click', close);
@@ -176,6 +186,9 @@
     overlay.querySelector('.seq-preview').addEventListener('click', startPreview);
     overlay.querySelector('.seq-stop').addEventListener('click', stopPlayback);
     overlay.querySelector('.seq-rec').addEventListener('click', startBounce);
+    ui.stepBtn.addEventListener('click', toggleStepRec);
+    ui.backBtn.addEventListener('click', function () { if (stepRec.on) stepBack(); });
+    ui.restBtn.addEventListener('click', function () { if (stepRec.on) stepAdvance(); });
 
     function canvasPos(e) {
       var rect = canvas.getBoundingClientRect();
@@ -331,10 +344,23 @@
       g.fillRect(x + w - 3, y, 2, h);
     });
 
+    // step-record cursor
+    if (stepRec.on) {
+      var len = Math.min(parseInt(ui.noteLen.value, 10) || 1, steps - (stepRec.cursor % steps));
+      var cx = (stepRec.cursor % steps) * sw;
+      g.fillStyle = 'rgba(61,220,132,0.16)';
+      g.fillRect(cx, 0, sw * len, H);
+      g.strokeStyle = '#3ddc84';
+      g.lineWidth = 2;
+      g.beginPath(); g.moveTo(cx + 1, 0); g.lineTo(cx + 1, H); g.stroke();
+      g.lineWidth = 1;
+    }
+
     ui.info.textContent = ed.pattern.bars + ' bar' + (ed.pattern.bars > 1 ? 's' : '') +
       ' · ' + ed.engine.transport.bpm.toFixed(1) + ' BPM · ' +
       ed.pattern.notes.length + ' notes · MIDI ch ' +
-      (ed.pattern.chan < 0 ? 'OMNI' : ed.pattern.chan + 1);
+      (ed.pattern.chan < 0 ? 'OMNI' : ed.pattern.chan + 1) +
+      (stepRec.on ? ' · STEP ' + (Math.floor(stepRec.cursor / 4) + 1) + '.' + (stepRec.cursor % 4 + 1) : '');
   }
 
   function playheadLoop() {
@@ -373,9 +399,14 @@
     return t.nextBoundary('bar');
   }
 
+  function endStepRec() {
+    if (stepRec.on) { stepRec.on = false; ui.stepBtn.classList.remove('active'); }
+  }
+
   function startPreview() {
     if (!ed || sess) return;
     if (!ed.midi.output) { ed.status('Select a MIDI clock out port first.'); return; }
+    endStepRec();
     var startF = ensureTransport();
     var lenF = Math.round(ed.pattern.bars * ed.engine.transport.barFrames());
     sess = { mode: 'preview', startF: startF, lenF: lenF, endF: Infinity, schedFrom: null };
@@ -390,6 +421,7 @@
       return;
     }
     if (!ed.pattern.notes.length) { ed.status('The pattern is empty.'); return; }
+    endStepRec();
     var startF = ensureTransport();
     var lenF = Math.round(ed.pattern.bars * ed.engine.transport.barFrames());
     sess = { mode: 'rec', startF: startF, lenF: lenF, endF: startF + lenF, schedFrom: null, closeSent: false };
@@ -534,6 +566,73 @@
     sess.schedFrom = horizon;
   }
 
+  /* ---------------- step recording ---------------- */
+  function toggleStepRec() {
+    if (!ed) return;
+    if (sess) { ed.status('Stop playback before step recording.'); return; }
+    stepRec.on = !stepRec.on;
+    ui.stepBtn.classList.toggle('active', stepRec.on);
+    if (stepRec.on) {
+      stepRec.cursor = 0; stepRec.held = []; stepRec.entered = false;
+      if (!ed.midi.output) ed.status('Step record on — play notes on your MIDI keyboard. (No MIDI out selected, so you won\'t hear them.)');
+      else ed.status('Step record on — play notes to enter them; REST skips, ⟵ deletes & backs up.');
+    } else {
+      ed.status('Step record off.');
+    }
+    render();
+  }
+
+  function stepLen() {
+    return parseInt(ui.noteLen.value, 10) || 1;
+  }
+
+  function stepAdvance() {
+    var steps = ed.pattern.bars * 16;
+    stepRec.cursor = (stepRec.cursor + stepLen()) % steps;
+    stepRec.entered = false;
+    render();
+  }
+
+  function stepBack() {
+    var steps = ed.pattern.bars * 16;
+    stepRec.cursor = ((stepRec.cursor - stepLen()) % steps + steps) % steps;
+    var cur = stepRec.cursor;
+    ed.pattern.notes = ed.pattern.notes.filter(function (n) { return n.step !== cur; });
+    stepRec.entered = false;
+    render();
+  }
+
+  /* Incoming MIDI while step-recording. Returns true if it consumed the event. */
+  function stepNoteOn(pitch, vel) {
+    var steps = ed.pattern.bars * 16;
+    var cur = stepRec.cursor % steps;
+    var len = Math.min(stepLen(), steps - cur);
+    // replace any existing note of this pitch at the cursor (re-press = overwrite)
+    ed.pattern.notes = ed.pattern.notes.filter(function (n) {
+      return !(n.step === cur && n.pitch === pitch);
+    });
+    ed.pattern.notes.push({ step: cur, pitch: pitch, len: len, vel: Math.max(1, Math.min(127, vel)) });
+    if (stepRec.held.indexOf(pitch) < 0) stepRec.held.push(pitch);
+    stepRec.entered = true;
+    previewNote(pitch);
+    render();
+  }
+
+  function stepNoteOff(pitch) {
+    var i = stepRec.held.indexOf(pitch);
+    if (i >= 0) stepRec.held.splice(i, 1);
+    // all keys of this chord released -> advance to the next step
+    if (stepRec.held.length === 0 && stepRec.entered) stepAdvance();
+  }
+
+  function handleMidi(data) {
+    if (!ed || !stepRec.on || sess) return false;
+    var hi = data[0] & 0xF0;
+    if (hi === 0x90 && data[2] > 0) { stepNoteOn(data[1], data[2]); return true; }
+    if (hi === 0x80 || (hi === 0x90 && data[2] === 0)) { stepNoteOff(data[1]); return true; }
+    return false;
+  }
+
   /* ---------------- entry ---------------- */
   function open(engine, midiMgr, ch, chLabel, statusFn) {
     if (!ui) buildUI();
@@ -554,6 +653,8 @@
       }
     }
     ed = { engine: engine, midi: midiMgr, ch: ch, chLabel: chLabel, pattern: ch.seqPattern, status: statusFn };
+    stepRec.on = false; stepRec.cursor = 0; stepRec.held = []; stepRec.entered = false;
+    ui.stepBtn.classList.remove('active');
     ui.title.textContent = 'SEQ LOOP ' + chLabel;
     ui.bars.value = String(ed.pattern.bars);
     if (!ui.bars.value) { ui.bars.value = '2'; ed.pattern.bars = 2; }
@@ -579,5 +680,5 @@
     ui.overlay.classList.add('hidden');
   }
 
-  window.MidiSequencer = { open: open };
+  window.MidiSequencer = { open: open, handleMidi: handleMidi };
 })();

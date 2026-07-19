@@ -185,6 +185,12 @@ which channel it listens on:
   rec* to keep the synth playing it live every cycle instead.
 - **SAVE MIDI** writes the pattern into an existing loop's MIDI events without
   recording; opening SEQ on a loop with captured MIDI converts it into editable notes.
+- **STEP REC** enters notes from your MIDI keyboard one step at a time: play a note
+  (or hold a chord) to place it at the green cursor, and it advances by the current
+  note length when you release — no timing pressure. Velocity is taken from how hard
+  you play. **REST** advances without a note; **⟵** steps back and deletes. The step
+  size follows the *Note* selector (1/16 … 1 bar), and the cursor wraps at the
+  pattern end.
 - **Bounce latency is self-calibrating**: the MIDI→synth→audio-input round trip
   would otherwise leave silence at the loop start and a cut-off tail. After each
   bounce the app measures where the first note's audio actually landed, rotates the
