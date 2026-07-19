@@ -6,11 +6,12 @@ beat synced record end possibility per loop  [DONE] per-loop quantize override (
 import function for audio and midi, compatible with allready exported files from ealrier versions
                                              [DONE] IMPORT button: reads exported zips (wav+mid+manifest, tempo restored), loose .wav/.mid, deflate zips; loops land stopped, bar-aligned on first play
 play all plays everything in synced          [DONE] PLAY ALL starts loops + 808 + 303 on one shared bar downbeat (grid loops rejoin in phase, free loops restart at 0)
-works on github pages without the server on port 8080
+works on github pages without the server on port 8080   [FIXED - push + enable "Enforce HTTPS" in repo Settings->Pages] http visitors lacked mic/MIDI/AudioWorklet and errors were invisible; now auto-redirects to https and shows startup errors on the power screen
 
 options for custom drum sound import, and spawning more chanels as well as the option to create polyrythms
 
 add automation to 303
+
 add more synth engines
 add vocoder 
 transpose feature
