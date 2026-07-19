@@ -465,14 +465,18 @@
     var lenF = Math.round(ed.pattern.bars * ed.engine.transport.barFrames());
     sess = { mode: 'rec', startF: startF, lenF: lenF, endF: startF + lenF, schedFrom: null, closeSent: false };
     var ch = ed.ch;
+    var internal = ch.midiTarget === 'int' && internalSynth;
     // internal target: route PRIZM into the loop input so its audio is recorded
-    if (ch.midiTarget === 'int' && internalSynth) {
+    if (internal) {
       sess.wasRouted = !!internalSynth.loopDelay;
       internalSynth.setLoopRoute(true);
     }
-    // widen the capture window by the measured MIDI/synth round trip so the
-    // synth's late-arriving audio lands at the right loop positions
-    ch.setComp(ed.engine.compFrames + Math.round(bounceCompMs / 1000 * ed.engine.ctx.sampleRate));
+    // External synth: widen the capture window by the measured MIDI/synth round trip
+    // so its late-arriving audio lands right. Internal synth has no such latency (its
+    // loop-route delay already matches comp), so don't add it — that would shift the
+    // audio early and leave silence at the end of the loop.
+    var extraComp = internal ? 0 : Math.round(bounceCompMs / 1000 * ed.engine.ctx.sampleRate);
+    ch.setComp(ed.engine.compFrames + extraComp);
     ch.sawNote = false; ch.lastMidiAbs = 0; ch.lastNoteOnAbs = 0;
     ch.pendingAction = 'record';
     ch.node.port.postMessage({ cmd: 'schedule', action: 'record', frame: startF, free: false });
@@ -520,16 +524,23 @@
             var on = 0;
             while (on < L.length && Math.abs(L[on]) < thr && Math.abs(R[on]) < thr) on++;
             var shift = on - firstOn;
+            // internal synth has no MIDI/synth latency to learn — align this take but
+            // don't fold its (attack-only) residual into the external calibration
+            var internal = ch.midiTarget === 'int';
             if (shift > 32 && shift < 0.35 * sr) {
               rotate = shift;
-              bounceCompMs = Math.min(500, bounceCompMs + shift / sr * 1000);
-              saveBounceComp();
-              if (statusFn) statusFn('Bounce aligned: compensated ' + Math.round(shift / sr * 1000) +
-                ' ms MIDI/synth latency (remembered for next takes).');
+              if (!internal) {
+                bounceCompMs = Math.min(500, bounceCompMs + shift / sr * 1000);
+                saveBounceComp();
+                if (statusFn) statusFn('Bounce aligned: compensated ' + Math.round(shift / sr * 1000) +
+                  ' ms MIDI/synth latency (remembered for next takes).');
+              }
             } else if (shift < -32 && shift > -0.05 * sr) {
               rotate = shift;
-              bounceCompMs = Math.max(0, bounceCompMs + shift / sr * 1000);
-              saveBounceComp();
+              if (!internal) {
+                bounceCompMs = Math.max(0, bounceCompMs + shift / sr * 1000);
+                saveBounceComp();
+              }
             }
           }
         }
