@@ -17,6 +17,7 @@ add more synth engines
 add vocoder 
 transpose feature                            [DONE] per-loop Pitch field (+/-24 st): granular pitch shift at playback, tempo/grid locked, MIDI notes follow, non-destructive
 song build from loops feature
-more effects
-effect automation
+more effects                                 [DONE] shared FX rack: filter(LP/HP/BP), delay(sync), reverb(sync), distortion, flanger, chorus - on loops AND 808/303/PRIZM buses
+effect automation                            [DONE] A button per knob: LFO (sine/tri/saw/sqr/rnd) at musical rates 1/16-4bars, transport phase-locked, depth around slider value
+
 

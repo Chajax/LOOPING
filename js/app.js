@@ -59,6 +59,11 @@
       prizm.buildUI($('prizm-panel'), $('prizm-ui'));
       wirePrizm();
 
+      drums.fxRack = attachInstrumentFx(drums.out, 'drums-fx', 'drums-fx-btn');
+      bass.fxRack = attachInstrumentFx(bass.out, 'bass-fx', 'bass-fx-btn');
+      prizm.fxRack = attachInstrumentFx(prizm.out, 'prizm-fx', 'prizm-fx-btn');
+      prizm.routeTap = prizm.fxRack.output;   // → looper records the FX'd signal
+
       powerMsg('Requesting microphone access — answer the browser prompt…');
       try {
         await engine.openInput();
@@ -351,6 +356,20 @@
       bass.clearPattern();
       status('303 pattern cleared.');
     });
+  }
+
+  /* Insert an FxRack between an instrument's output and the master bus. */
+  function attachInstrumentFx(sourceNode, containerId, btnId) {
+    var rack = new window.FxRack(engine);
+    sourceNode.disconnect();
+    sourceNode.connect(rack.input);
+    rack.output.connect(engine.masterGain);
+    rack.mountUI($(containerId));
+    $(btnId).addEventListener('click', function () {
+      $(containerId).classList.toggle('hidden');
+      this.classList.toggle('active', !$(containerId).classList.contains('hidden'));
+    });
+    return rack;
   }
 
   /* ---------------- PRIZM synth ---------------- */
@@ -722,13 +741,7 @@
       '<div class="ch-vol ch-pitch"><label>Pitch</label>' +
         '<input type="number" min="-24" max="24" step="1" value="0" title="Transpose this loop in semitones — pitch shifts, tempo stays locked (MIDI notes follow)">' +
         '<span class="unit">st</span></div>' +
-      '<div class="fx-section">' +
-        '<div class="fx-list"></div>' +
-        '<div class="fx-add">' +
-          '<select class="fx-select"></select>' +
-          '<button class="fx-add-btn" title="Add effect">＋</button>' +
-        '</div>' +
-      '</div>';
+      '<div class="fx-section"><div class="fx-rack"></div></div>';
 
     var els = {
       title: root.querySelector('.ch-title'),
@@ -747,17 +760,10 @@
       midiChk: root.querySelector('.midi-rec input'),
       midiCount: root.querySelector('.midi-count'),
       vol: root.querySelector('.ch-vol input'),
-      pitch: root.querySelector('.ch-pitch input'),
-      fxList: root.querySelector('.fx-list'),
-      fxSelect: root.querySelector('.fx-select')
+      pitch: root.querySelector('.ch-pitch input')
     };
 
-    Object.keys(window.FX_DEFS).forEach(function (key) {
-      var opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = window.FX_DEFS[key].name;
-      els.fxSelect.appendChild(opt);
-    });
+    ch.rack.mountUI(root.querySelector('.fx-rack'));
 
     var strip = { ch: ch, root: root, els: els };
 
@@ -796,67 +802,12 @@
       refreshStrip(strip);
     }));
     root.querySelector('.ch-close').addEventListener('click', function () { removeChannel(strip); });
-    root.querySelector('.fx-add-btn').addEventListener('click', function () {
-      var entry = ch.addFx(els.fxSelect.value);
-      if (entry) els.fxList.appendChild(buildFxCard(ch, entry));
-    });
 
     ch.onUpdate = function () { refreshStrip(strip); };
     ch.onPos = function () { refreshPos(strip); };
 
     $('channels').appendChild(root);
     return strip;
-  }
-
-  function buildFxCard(ch, entry) {
-    var card = document.createElement('div');
-    card.className = 'fx-card';
-    var head = document.createElement('div');
-    head.className = 'fx-head';
-    head.innerHTML = '<span class="fx-name">' + entry.def.name + '</span>';
-    var rm = document.createElement('button');
-    rm.className = 'fx-remove';
-    rm.textContent = '✕';
-    rm.addEventListener('click', function () {
-      ch.removeFx(entry);
-      card.remove();
-    });
-    head.appendChild(rm);
-    card.appendChild(head);
-
-    entry.def.params.forEach(function (p) {
-      var row = document.createElement('div');
-      row.className = 'fx-param';
-      var lbl = document.createElement('span');
-      lbl.textContent = p.label;
-      var input = document.createElement('input');
-      input.type = 'range';
-      var val = document.createElement('span');
-      val.className = 'val';
-      if (p.log) {
-        input.min = Math.log(p.min); input.max = Math.log(p.max);
-        input.step = (Math.log(p.max) - Math.log(p.min)) / 200;
-        input.value = Math.log(p.def);
-      } else {
-        input.min = p.min; input.max = p.max;
-        input.step = (p.max - p.min) / 200;
-        input.value = p.def;
-      }
-      var show = function (v) {
-        val.textContent = (v >= 100 ? Math.round(v) : Math.round(v * 100) / 100) + (p.unit || '');
-      };
-      show(p.def);
-      input.addEventListener('input', function () {
-        var v = parseFloat(this.value);
-        if (p.log) v = Math.exp(v);
-        entry.values[p.id] = v;
-        entry.inst.set(p.id, v);
-        show(v);
-      });
-      row.appendChild(lbl); row.appendChild(input); row.appendChild(val);
-      card.appendChild(row);
-    });
-    return card;
   }
 
   var STATE_LABELS = {

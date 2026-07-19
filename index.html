@@ -145,9 +145,11 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
     <button id="drum-add-voice" title="Add another row of the selected synth voice">＋ VOICE</button>
     <button id="drum-add-sample" title="Add a row that plays an imported audio file (wav/mp3/ogg)">＋ SAMPLE</button>
     <input type="file" id="drum-sample-file" accept="audio/*" multiple style="display:none">
+    <button id="drums-fx-btn" title="Effects on the drum bus (with automation)">FX</button>
     <span class="hint">16ths of the master bar · per-row step count ≠ 16 = polyrhythm · click names to preview</span>
   </div>
   <div id="drum-grid"></div>
+  <div id="drums-fx" class="inst-fx hidden"></div>
 </section>
 
 <section id="bass-panel" class="hidden">
@@ -169,9 +171,11 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
     <label>Decay</label>
     <input type="range" id="bass-decay" min="0.03" max="1" step="0.01" value="0.25">
     <button id="bass-clear" title="Clear the whole pattern">CLEAR</button>
+    <button id="bass-fx-btn" title="Effects on the 303 bus (with automation)">FX</button>
     <span class="hint">one note per step · ACC = accent · SLD = slide to next note</span>
   </div>
   <div id="bass-grid"></div>
+  <div id="bass-fx" class="inst-fx hidden"></div>
 </section>
 
 <section id="prizm-panel" class="hidden">
@@ -181,9 +185,11 @@ if (location.protocol === 'http:' && !/^(localhost|127\.|\[?::1)/.test(location.
     <label class="chk" title="Route PRIZM into the loop input bus so loop channels record it (latency-compensated)"><input type="checkbox" id="prizm-to-looper"> → looper</label>
     <label>Vol</label>
     <input type="range" id="prizm-vol" min="0" max="1.2" step="0.01" value="0.72">
+    <button id="prizm-fx-btn" title="Effects on the PRIZM bus (with automation)">FX</button>
     <span class="hint">dual refraction synth · keys A W S E D F … + Z/X octave while open · n = 1 harmonic rainbow, n ≠ 1 inharmonic glass</span>
   </div>
   <div id="prizm-ui"></div>
+  <div id="prizm-fx" class="inst-fx hidden"></div>
 </section>
 
 <main id="channels" class="hidden"></main>

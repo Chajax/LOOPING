@@ -1,7 +1,19 @@
-/* Effect definitions. Each build(ctx) returns { input, output, set(paramId, value), dispose() }.
-   input/output are AudioNodes; the channel chains them between its worklet and gain. */
+/* Effects + FxRack: a shared effect-chain component with per-parameter LFO
+   automation, used by loop channels and the instrument buses (808/303/PRIZM).
+
+   Effect contract: def.build(ctx, engine) -> { input, output, set(id, v),
+   tick(transport)?, dispose() }. Params are range sliders ({min,max,def,log,
+   unit,auto}) or selects ({type:'select', options:[[value,label],...]}).
+   Automation runs on a single shared ticker, phase-locked to the transport. */
 (function () {
   'use strict';
+
+  var RATE_BEATS = {
+    '1/16': 0.25, '1/8': 0.5, '1/8.': 0.75, '1/4': 1,
+    '1/2': 2, '1/1': 4, '2/1': 8, '4/1': 16
+  };
+  var SYNC_OPTS = [['off', 'free'], ['1/16', '1/16'], ['1/8', '1/8'], ['1/8.', '1/8.'],
+    ['1/4', '1/4'], ['1/2', '1/2'], ['1/1', '1 bar']];
 
   function makeReverbIR(ctx, seconds) {
     var sr = ctx.sampleRate;
@@ -25,11 +37,15 @@
     return curve;
   }
 
+  function beatsToSec(div, bpm) { return RATE_BEATS[div] * 60 / bpm; }
+
+  /* ---------------- effect definitions ---------------- */
   window.FX_DEFS = {
-    lpf: {
-      name: 'Low-pass Filter',
+    filter: {
+      name: 'Filter',
       params: [
-        { id: 'freq', label: 'Cutoff', min: 100, max: 18000, def: 6000, log: true, unit: 'Hz' },
+        { id: 'type', label: 'Type', type: 'select', def: 'lp', options: [['lp', 'Low-pass'], ['hp', 'High-pass'], ['bp', 'Band-pass']] },
+        { id: 'freq', label: 'Cutoff', min: 40, max: 18000, def: 2400, log: true, unit: 'Hz' },
         { id: 'q', label: 'Reso', min: 0.1, max: 14, def: 0.8, unit: '' }
       ],
       build: function (ctx) {
@@ -38,27 +54,8 @@
         return {
           input: f, output: f,
           set: function (id, v) {
-            if (id === 'freq') f.frequency.setTargetAtTime(v, ctx.currentTime, 0.01);
-            else f.Q.setTargetAtTime(v, ctx.currentTime, 0.01);
-          },
-          dispose: function () { f.disconnect(); }
-        };
-      }
-    },
-
-    hpf: {
-      name: 'High-pass Filter',
-      params: [
-        { id: 'freq', label: 'Cutoff', min: 30, max: 8000, def: 300, log: true, unit: 'Hz' },
-        { id: 'q', label: 'Reso', min: 0.1, max: 14, def: 0.8, unit: '' }
-      ],
-      build: function (ctx) {
-        var f = ctx.createBiquadFilter();
-        f.type = 'highpass';
-        return {
-          input: f, output: f,
-          set: function (id, v) {
-            if (id === 'freq') f.frequency.setTargetAtTime(v, ctx.currentTime, 0.01);
+            if (id === 'type') f.type = v === 'hp' ? 'highpass' : v === 'bp' ? 'bandpass' : 'lowpass';
+            else if (id === 'freq') f.frequency.setTargetAtTime(v, ctx.currentTime, 0.01);
             else f.Q.setTargetAtTime(v, ctx.currentTime, 0.01);
           },
           dispose: function () { f.disconnect(); }
@@ -69,24 +66,36 @@
     delay: {
       name: 'Delay',
       params: [
+        { id: 'sync', label: 'Sync', type: 'select', def: 'off', options: SYNC_OPTS },
         { id: 'time', label: 'Time', min: 30, max: 1500, def: 350, unit: 'ms' },
         { id: 'fb', label: 'Feedbk', min: 0, max: 0.92, def: 0.35, unit: '' },
         { id: 'mix', label: 'Mix', min: 0, max: 1, def: 0.3, unit: '' }
       ],
-      build: function (ctx) {
+      build: function (ctx, engine) {
         var input = ctx.createGain(), output = ctx.createGain();
-        var dly = ctx.createDelay(2.0), fb = ctx.createGain(), wet = ctx.createGain();
-        input.connect(output);            // dry
+        var dly = ctx.createDelay(4.0), fb = ctx.createGain(), wet = ctx.createGain();
+        input.connect(output);
         input.connect(dly);
         dly.connect(wet); wet.connect(output);
         dly.connect(fb); fb.connect(dly);
+        var st = { sync: 'off', time: 350, applied: 0 };
+        function applyTime(bpm) {
+          var sec = st.sync === 'off' ? st.time / 1000 : Math.min(3.9, beatsToSec(st.sync, bpm));
+          if (Math.abs(sec - st.applied) > 0.001) {
+            st.applied = sec;
+            dly.delayTime.setTargetAtTime(sec, ctx.currentTime, 0.05);
+          }
+        }
+        applyTime(engine.transport ? engine.transport.bpm : 120);
         return {
           input: input, output: output,
           set: function (id, v) {
-            if (id === 'time') dly.delayTime.setTargetAtTime(v / 1000, ctx.currentTime, 0.05);
+            if (id === 'time') { st.time = v; applyTime(engine.transport.bpm); }
+            else if (id === 'sync') { st.sync = v; applyTime(engine.transport.bpm); }
             else if (id === 'fb') fb.gain.setTargetAtTime(v, ctx.currentTime, 0.01);
             else wet.gain.setTargetAtTime(v, ctx.currentTime, 0.01);
           },
+          tick: function (t) { if (st.sync !== 'off') applyTime(t.bpm); },
           dispose: function () { input.disconnect(); dly.disconnect(); fb.disconnect(); wet.disconnect(); }
         };
       }
@@ -95,23 +104,37 @@
     reverb: {
       name: 'Reverb',
       params: [
-        { id: 'decay', label: 'Decay', min: 0.3, max: 8, def: 2.2, unit: 's' },
+        { id: 'sync', label: 'Sync', type: 'select', def: 'off', options: [['off', 'free'], ['1/2', '1/2'], ['1/1', '1 bar'], ['2/1', '2 bars']] },
+        { id: 'decay', label: 'Decay', min: 0.3, max: 8, def: 2.2, unit: 's', auto: false },
         { id: 'mix', label: 'Mix', min: 0, max: 1, def: 0.35, unit: '' }
       ],
-      build: function (ctx) {
+      build: function (ctx, engine) {
         var input = ctx.createGain(), output = ctx.createGain();
         var conv = ctx.createConvolver(), wet = ctx.createGain();
         conv.buffer = makeReverbIR(ctx, 2.2);
-        input.connect(output);            // dry
+        input.connect(output);
         input.connect(conv); conv.connect(wet); wet.connect(output);
+        var st = { sync: 'off', decay: 2.2, applied: 2.2, lastRegen: 0 };
         var regenTimer = null;
+        function regen(sec) {
+          sec = Math.max(0.3, Math.min(10, sec));
+          if (Math.abs(sec - st.applied) / st.applied < 0.05) return;
+          var now = Date.now();
+          if (now - st.lastRegen < 400) return;
+          st.applied = sec;
+          st.lastRegen = now;
+          conv.buffer = makeReverbIR(ctx, sec);
+        }
         return {
           input: input, output: output,
           set: function (id, v) {
             if (id === 'mix') { wet.gain.setTargetAtTime(v, ctx.currentTime, 0.01); return; }
+            if (id === 'sync') { st.sync = v; if (v !== 'off') regen(beatsToSec(v, engine.transport.bpm)); return; }
+            st.decay = v;
             clearTimeout(regenTimer);
-            regenTimer = setTimeout(function () { conv.buffer = makeReverbIR(ctx, v); }, 250);
+            regenTimer = setTimeout(function () { if (st.sync === 'off') regen(st.decay); }, 250);
           },
+          tick: function (t) { if (st.sync !== 'off') regen(beatsToSec(st.sync, t.bpm)); },
           dispose: function () { clearTimeout(regenTimer); input.disconnect(); conv.disconnect(); wet.disconnect(); }
         };
       }
@@ -120,7 +143,7 @@
     dist: {
       name: 'Distortion',
       params: [
-        { id: 'drive', label: 'Drive', min: 1, max: 120, def: 20, unit: '' },
+        { id: 'drive', label: 'Drive', min: 1, max: 120, def: 20, unit: '', auto: false },
         { id: 'mix', label: 'Mix', min: 0, max: 1, def: 1, unit: '' }
       ],
       build: function (ctx) {
@@ -145,6 +168,43 @@
       }
     },
 
+    flanger: {
+      name: 'Flanger',
+      params: [
+        { id: 'rate', label: 'Rate', min: 0.05, max: 2, def: 0.25, unit: 'Hz' },
+        { id: 'depth', label: 'Depth', min: 0, max: 3, def: 1.5, unit: 'ms' },
+        { id: 'fb', label: 'Feedbk', min: 0, max: 0.85, def: 0.4, unit: '' },
+        { id: 'mix', label: 'Mix', min: 0, max: 1, def: 0.5, unit: '' }
+      ],
+      build: function (ctx) {
+        var input = ctx.createGain(), output = ctx.createGain();
+        var dly = ctx.createDelay(0.05), wet = ctx.createGain(), fb = ctx.createGain();
+        var osc = ctx.createOscillator(), lfoGain = ctx.createGain();
+        dly.delayTime.value = 0.004;
+        osc.frequency.value = 0.25;
+        lfoGain.gain.value = 0.0015;
+        osc.connect(lfoGain); lfoGain.connect(dly.delayTime);
+        osc.start();
+        input.connect(output);
+        input.connect(dly); dly.connect(wet); wet.connect(output);
+        dly.connect(fb); fb.connect(dly);
+        fb.gain.value = 0.4;
+        return {
+          input: input, output: output,
+          set: function (id, v) {
+            if (id === 'rate') osc.frequency.setTargetAtTime(v, ctx.currentTime, 0.05);
+            else if (id === 'depth') lfoGain.gain.setTargetAtTime(v / 2000, ctx.currentTime, 0.05);
+            else if (id === 'fb') fb.gain.setTargetAtTime(v, ctx.currentTime, 0.01);
+            else wet.gain.setTargetAtTime(v, ctx.currentTime, 0.01);
+          },
+          dispose: function () {
+            try { osc.stop(); } catch (e) {}
+            input.disconnect(); dly.disconnect(); wet.disconnect(); fb.disconnect(); osc.disconnect(); lfoGain.disconnect();
+          }
+        };
+      }
+    },
+
     chorus: {
       name: 'Chorus',
       params: [
@@ -161,7 +221,7 @@
         lfoGain.gain.value = 0.0035;
         osc.connect(lfoGain); lfoGain.connect(dly.delayTime);
         osc.start();
-        input.connect(output);            // dry
+        input.connect(output);
         input.connect(dly); dly.connect(wet); wet.connect(output);
         return {
           input: input, output: output,
@@ -178,4 +238,268 @@
       }
     }
   };
+
+  /* ---------------- automation ---------------- */
+  var AUTO_RATES = [['1/16', '1/16'], ['1/8', '1/8'], ['1/4', '1/4'], ['1/2', '1/2'],
+    ['1/1', '1 bar'], ['2/1', '2 bars'], ['4/1', '4 bars']];
+
+  function lfoVal(wave, ph, cycleIdx) {
+    switch (wave) {
+      case 'tri': return 1 - 4 * Math.abs(ph - 0.5);
+      case 'saw': return 2 * ph - 1;
+      case 'sqr': return ph < 0.5 ? 1 : -1;
+      case 'rnd':
+        var x = Math.sin(cycleIdx * 127.1 + 31.7) * 43758.5453;
+        return (x - Math.floor(x)) * 2 - 1;
+      default: return Math.sin(2 * Math.PI * ph);
+    }
+  }
+
+  function fmtVal(p, v) {
+    return (v >= 100 ? Math.round(v) : Math.round(v * 100) / 100) + (p.unit || '');
+  }
+
+  /* ---------------- FxRack ---------------- */
+  var racks = [];
+  var ticker = null;
+
+  function tickAll() {
+    for (var r = 0; r < racks.length; r++) {
+      var rack = racks[r];
+      var t = rack.engine.transport;
+      if (!t) continue;
+      var beats = t.running
+        ? (t.nowFrame() - t.origin) / t.beatFrames()
+        : performance.now() / 1000 * t.bpm / 60;
+      for (var f = 0; f < rack.fx.length; f++) {
+        var entry = rack.fx[f];
+        if (entry.inst.tick) entry.inst.tick(t);
+        for (var pi = 0; pi < entry.def.params.length; pi++) {
+          var p = entry.def.params[pi];
+          if (p.type === 'select') continue;
+          var a = entry.autos[p.id];
+          if (!a || !a.on) continue;
+          var cyc = RATE_BEATS[a.rate] || 4;
+          var ph = ((beats / cyc) % 1 + 1) % 1;
+          var lfo = lfoVal(a.wave, ph, Math.floor(beats / cyc));
+          var v;
+          if (p.log) {
+            var lmin = Math.log(p.min), lmax = Math.log(p.max);
+            var b0 = Math.log(entry.values[p.id]);
+            var span = (lmax - lmin) / 2 * a.depth;
+            v = Math.exp(Math.min(lmax, Math.max(lmin, b0 + lfo * span)));
+          } else {
+            var span2 = (p.max - p.min) / 2 * a.depth;
+            v = Math.min(p.max, Math.max(p.min, entry.values[p.id] + lfo * span2));
+          }
+          entry.inst.set(p.id, v);
+          if (entry.outEls && entry.outEls[p.id]) entry.outEls[p.id].textContent = fmtVal(p, v);
+        }
+      }
+    }
+  }
+
+  function FxRack(engine) {
+    this.engine = engine;
+    this.input = engine.ctx.createGain();
+    this.output = engine.ctx.createGain();
+    this.input.connect(this.output);
+    this.fx = [];        // { key, def, inst, values, autos, card, outEls }
+    this.listEl = null;
+    racks.push(this);
+    if (!ticker) ticker = setInterval(tickAll, 33);
+  }
+
+  FxRack.prototype.addFx = function (key) {
+    var def = window.FX_DEFS[key];
+    if (!def) return null;
+    var inst = def.build(this.engine.ctx, this.engine);
+    var values = {}, autos = {};
+    def.params.forEach(function (p) {
+      values[p.id] = p.def;
+      inst.set(p.id, p.def);
+      if (p.type !== 'select' && p.auto !== false) {
+        autos[p.id] = { on: false, wave: 'sine', rate: '1/1', depth: 0.5 };
+      }
+    });
+    var entry = { key: key, def: def, inst: inst, values: values, autos: autos, card: null, outEls: {} };
+    this.fx.push(entry);
+    this.rebuild();
+    if (this.listEl) this.buildCard(entry);
+    return entry;
+  };
+
+  FxRack.prototype.removeFx = function (entry) {
+    var i = this.fx.indexOf(entry);
+    if (i < 0) return;
+    this.fx.splice(i, 1);
+    this.rebuild();
+    entry.inst.dispose();
+    if (entry.card) entry.card.remove();
+  };
+
+  FxRack.prototype.rebuild = function () {
+    this.input.disconnect();
+    this.fx.forEach(function (e) { e.inst.output.disconnect(); });
+    var prev = this.input;
+    for (var i = 0; i < this.fx.length; i++) {
+      prev.connect(this.fx[i].inst.input);
+      prev = this.fx[i].inst.output;
+    }
+    prev.connect(this.output);
+  };
+
+  FxRack.prototype.dispose = function () {
+    this.fx.forEach(function (e) { e.inst.dispose(); });
+    this.fx = [];
+    this.input.disconnect();
+    this.output.disconnect();
+    var i = racks.indexOf(this);
+    if (i >= 0) racks.splice(i, 1);
+  };
+
+  /* ---------------- rack UI ---------------- */
+  FxRack.prototype.mountUI = function (root) {
+    var self = this;
+    var add = document.createElement('div');
+    add.className = 'fx-add';
+    var sel = document.createElement('select');
+    Object.keys(window.FX_DEFS).forEach(function (key) {
+      var opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = window.FX_DEFS[key].name;
+      sel.appendChild(opt);
+    });
+    var btn = document.createElement('button');
+    btn.textContent = '＋';
+    btn.title = 'Add effect';
+    btn.addEventListener('click', function () { self.addFx(sel.value); });
+    add.appendChild(sel); add.appendChild(btn);
+    root.appendChild(add);
+    this.listEl = document.createElement('div');
+    this.listEl.className = 'fx-list';
+    root.appendChild(this.listEl);
+    this.fx.forEach(function (e) { self.buildCard(e); });
+  };
+
+  FxRack.prototype.buildCard = function (entry) {
+    var self = this;
+    var card = document.createElement('div');
+    card.className = 'fx-card';
+    var head = document.createElement('div');
+    head.className = 'fx-head';
+    head.innerHTML = '<span class="fx-name">' + entry.def.name + '</span>';
+    var rm = document.createElement('button');
+    rm.className = 'fx-remove';
+    rm.textContent = '✕';
+    rm.addEventListener('click', function () { self.removeFx(entry); });
+    head.appendChild(rm);
+    card.appendChild(head);
+
+    entry.def.params.forEach(function (p) {
+      if (p.type === 'select') {
+        var srow = document.createElement('div');
+        srow.className = 'fx-param';
+        var slbl = document.createElement('span');
+        slbl.textContent = p.label;
+        var ssel = document.createElement('select');
+        ssel.className = 'fx-sel';
+        p.options.forEach(function (o) {
+          var opt = document.createElement('option');
+          opt.value = o[0]; opt.textContent = o[1];
+          ssel.appendChild(opt);
+        });
+        ssel.value = p.def;
+        ssel.addEventListener('change', function () {
+          entry.values[p.id] = this.value;
+          entry.inst.set(p.id, this.value);
+        });
+        srow.appendChild(slbl); srow.appendChild(ssel);
+        srow.appendChild(document.createElement('span'));
+        srow.appendChild(document.createElement('span'));
+        card.appendChild(srow);
+        return;
+      }
+
+      var row = document.createElement('div');
+      row.className = 'fx-param';
+      var lbl = document.createElement('span');
+      lbl.textContent = p.label;
+      var input = document.createElement('input');
+      input.type = 'range';
+      if (p.log) {
+        input.min = Math.log(p.min); input.max = Math.log(p.max);
+        input.step = (Math.log(p.max) - Math.log(p.min)) / 200;
+        input.value = Math.log(p.def);
+      } else {
+        input.min = p.min; input.max = p.max;
+        input.step = (p.max - p.min) / 200;
+        input.value = p.def;
+      }
+      var val = document.createElement('span');
+      val.className = 'val';
+      val.textContent = fmtVal(p, p.def);
+      entry.outEls[p.id] = val;
+      input.addEventListener('input', function () {
+        var v = parseFloat(this.value);
+        if (p.log) v = Math.exp(v);
+        entry.values[p.id] = v;
+        entry.inst.set(p.id, v);
+        val.textContent = fmtVal(p, v);
+      });
+      row.appendChild(lbl); row.appendChild(input); row.appendChild(val);
+
+      var a = entry.autos[p.id];
+      if (a) {
+        var ab = document.createElement('button');
+        ab.className = 'fx-auto-btn';
+        ab.textContent = 'A';
+        ab.title = 'Automate this parameter (LFO around the slider value)';
+        row.appendChild(ab);
+        card.appendChild(row);
+
+        var arow = document.createElement('div');
+        arow.className = 'fx-auto hidden';
+        var wsel = document.createElement('select');
+        [['sine', '∿ sine'], ['tri', '△ tri'], ['saw', '⩗ saw'], ['sqr', '⊓ sqr'], ['rnd', '⁘ rnd']].forEach(function (w) {
+          var o = document.createElement('option');
+          o.value = w[0]; o.textContent = w[1];
+          wsel.appendChild(o);
+        });
+        var rsel = document.createElement('select');
+        AUTO_RATES.forEach(function (r) {
+          var o = document.createElement('option');
+          o.value = r[0]; o.textContent = r[1];
+          rsel.appendChild(o);
+        });
+        rsel.value = a.rate;
+        var dep = document.createElement('input');
+        dep.type = 'range';
+        dep.min = 0; dep.max = 1; dep.step = 0.01; dep.value = a.depth;
+        dep.title = 'Automation depth';
+        wsel.addEventListener('change', function () { a.wave = this.value; });
+        rsel.addEventListener('change', function () { a.rate = this.value; });
+        dep.addEventListener('input', function () { a.depth = parseFloat(this.value); });
+        ab.addEventListener('click', function () {
+          a.on = !a.on;
+          ab.classList.toggle('on', a.on);
+          arow.classList.toggle('hidden', !a.on);
+          if (!a.on) {
+            entry.inst.set(p.id, entry.values[p.id]);
+            val.textContent = fmtVal(p, entry.values[p.id]);
+          }
+        });
+        arow.appendChild(wsel); arow.appendChild(rsel); arow.appendChild(dep);
+        card.appendChild(arow);
+      } else {
+        row.appendChild(document.createElement('span'));
+        card.appendChild(row);
+      }
+    });
+
+    entry.card = card;
+    this.listEl.appendChild(card);
+  };
+
+  window.FxRack = FxRack;
 })();

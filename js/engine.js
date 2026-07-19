@@ -377,15 +377,12 @@
       outputChannelCount: [2],
       processorOptions: { comp: engine.compFrames }
     });
-    this.chainIn = ctx.createGain();
-    this.chainOut = ctx.createGain();
     this.gain = ctx.createGain();
+    this.rack = new window.FxRack(engine);
     engine.inputNode.connect(this.node);
-    this.node.connect(this.chainIn);
-    this.chainIn.connect(this.chainOut);
-    this.chainOut.connect(this.gain);
+    this.node.connect(this.rack.input);
+    this.rack.output.connect(this.gain);
     this.gain.connect(engine.masterGain);
-    this.fx = []; // { key, def, inst, values }
 
     this.node.port.onmessage = function (e) {
       var m = e.data;
@@ -606,41 +603,11 @@
     return st;
   };
 
-  LoopChannel.prototype.addFx = function (key) {
-    var def = window.FX_DEFS[key];
-    if (!def) return null;
-    var inst = def.build(this.engine.ctx);
-    var values = {};
-    def.params.forEach(function (p) { values[p.id] = p.def; inst.set(p.id, p.def); });
-    var entry = { key: key, def: def, inst: inst, values: values };
-    this.fx.push(entry);
-    this.rebuildChain();
-    return entry;
-  };
-  LoopChannel.prototype.removeFx = function (entry) {
-    var i = this.fx.indexOf(entry);
-    if (i < 0) return;
-    this.fx.splice(i, 1);
-    this.rebuildChain();
-    entry.inst.dispose();
-  };
-  LoopChannel.prototype.rebuildChain = function () {
-    this.chainIn.disconnect();
-    this.fx.forEach(function (e) { e.inst.output.disconnect(); });
-    var prev = this.chainIn;
-    for (var i = 0; i < this.fx.length; i++) {
-      prev.connect(this.fx[i].inst.input);
-      prev = this.fx[i].inst.output;
-    }
-    prev.connect(this.chainOut);
-  };
   LoopChannel.prototype.destroy = function () {
     this.node.port.postMessage({ cmd: 'clear' });
     try { this.engine.inputNode.disconnect(this.node); } catch (e) {}
     this.node.disconnect();
-    this.fx.forEach(function (e) { e.inst.dispose(); });
-    this.chainIn.disconnect();
-    this.chainOut.disconnect();
+    this.rack.dispose();
     this.gain.disconnect();
   };
 

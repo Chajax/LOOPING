@@ -88,10 +88,11 @@
     if (on && !this.loopDelay) {
       this.loopDelay = eng.ctx.createDelay(1);
       this.loopDelay.delayTime.value = eng.compFrames / eng.ctx.sampleRate;
-      this.out.connect(this.loopDelay);
+      this._routeSrc = this.routeTap || this.out;   // post-FX when a rack is attached
+      this._routeSrc.connect(this.loopDelay);
       this.loopDelay.connect(eng.inputNode);
     } else if (!on && this.loopDelay) {
-      this.out.disconnect(this.loopDelay);
+      this._routeSrc.disconnect(this.loopDelay);
       this.loopDelay.disconnect();
       this.loopDelay = null;
     }

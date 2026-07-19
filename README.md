@@ -40,8 +40,21 @@ AudioWorklet). Click **POWER ON** and grant microphone + MIDI permissions.
    playback, so tempo, length and grid stay locked; captured MIDI notes transpose
    with it, and it's non-destructive: 0 st is bit-exact passthrough and EDIT/SLICE/
    EXPORT always see the original audio), STOP / UNDO (one level of overdub undo) /
-   CLEAR, and an FX chain (low/high-pass filter, delay, reverb, distortion, chorus —
-   stack freely).
+   CLEAR, and an FX chain (see *Effects & automation*).
+
+### Effects & automation
+
+One shared FX rack powers the loop channels **and** the instrument buses — the 808,
+303 and PRIZM panels each have an **FX** button opening their own chain. Effects:
+**Filter** (low/high/band-pass), **Delay** (free ms or tempo-synced 1/16…1 bar,
+follows BPM changes), **Reverb** (free decay or synced to 1/2…2 bars),
+**Distortion**, **Flanger**, **Chorus** — stack and order freely.
+
+Every knob has an **A** button: LFO automation around the slider's value — waveform
+(sine / tri / saw / square / random sample-&-hold), musical rate (1/16 … 4 bars,
+phase-locked to the transport so sweeps land on bar lines), and depth. Filter
+sweeps run in log-frequency space so they sound even across the range. The slider
+stays live as the automation's center while it runs.
 
 ### MIDI-triggered recording & MIDI loops
 
