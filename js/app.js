@@ -14,6 +14,8 @@
   var autoDomTargets = {};
   var autoDomSeq = 1;
   var autoDomListenerOn = false;
+  var autoLoopsRun = false;
+  var autoLoopsStartFrame = 0;
   var nextAutoId = 1;
   var RING_C = 2 * Math.PI * 50;
 
@@ -273,6 +275,8 @@
         $('bass-toggle').classList.remove('active');
       }
       if (prizm) prizm.allOff();
+      autoLoopsRun = false;
+      autoLoopsStartFrame = 0;
       autoStrips.forEach(function (s) { s.root.remove(); });
       autoStrips = [];
       nextAutoId = 1;
@@ -530,6 +534,8 @@
   /* ---------------- stop all / play all (loops + 808 + 303) ---------------- */
   function stopEverything() {
     if (window.SongArranger && window.SongArranger.isPlaying()) window.SongArranger.stop();
+    autoLoopsRun = false;
+    autoLoopsStartFrame = 0;
     engine.stopAll();
     midi.sendStop();
     if (drums.enabled) {
@@ -560,7 +566,8 @@
     var wantLoops = engine.channels.some(function (c) { return c.state === 'stopped'; });
     var wantDrums = !drums.enabled && drumsHavePattern();
     var wantBass = !bass.enabled && bassHasPattern();
-    if (!wantLoops && !wantDrums && !wantBass) { status('Nothing to play.'); return; }
+    var wantAuto = autoStrips.some(function (s) { return s.targetId && s.state === 'playing'; });
+    if (!wantLoops && !wantDrums && !wantBass && !wantAuto) { status('Nothing to play.'); return; }
 
     var f;
     if (!t.running) {
@@ -586,6 +593,11 @@
       bass.schedFrom = f - 1;
       $('bass-toggle').classList.add('active');
       started.push('303');
+    }
+    if (wantAuto) {
+      autoLoopsRun = true;
+      autoLoopsStartFrame = f;
+      started.push('automation');
     }
     var waitMs = (f - t.nowFrame()) / t.sr * 1000;
     status('Playing ' + started.join(' + ') + (waitMs > 100 ? ' together at the next bar.' : ' together.'));
@@ -1372,11 +1384,17 @@
     });
 
     var beats = currentTransportBeats();
+    var nowFrame = engine.transport.nowFrame();
+    var songPlaying = !!(window.SongArranger && window.SongArranger.isPlaying && window.SongArranger.isPlaying());
     autoStrips.forEach(function (s) {
       if (s.state === 'recording' && s.recStarted && Date.now() - s.lastMoveWall > 900) {
         finishAutomationRecord(s);
       }
       if (beats === null || s.state !== 'playing' || !s.targetId) {
+        drawAutomationSeq(s, -1);
+        return;
+      }
+      if (!songPlaying && (!autoLoopsRun || nowFrame < autoLoopsStartFrame)) {
         drawAutomationSeq(s, -1);
         return;
       }
