@@ -15,12 +15,16 @@
   var internalSynth = null;   // PRIZM, for the "→ internal synth" target
 
   /* Measured MIDI→synth→audio-input round trip for bounce recordings (ms).
-     Self-calibrates: each bounce measures the residual misalignment of the first
-     note's audio and folds it in, so takes get tighter over time. */
+     Self-calibrates: each bounce measures where the first note's audio landed and
+     folds it in, converging so the capture keeps ~BOUNCE_SAFETY of pre-roll (never
+     clipping a soft attack at capture time). The post-bounce rotate then puts the
+     audio onset exactly on the first MIDI note — the rotate is circular, so this
+     costs nothing. Key is versioned so an older, over-accumulated value resets. */
+  var BOUNCE_SAFETY = 0.010;   // seconds of capture head-room kept before the first note
   var bounceCompMs = 0;
-  try { bounceCompMs = parseFloat(localStorage.getItem('looping-bounce-comp')) || 0; } catch (e) {}
+  try { bounceCompMs = parseFloat(localStorage.getItem('looping-bounce-comp-v2')) || 0; } catch (e) {}
   function saveBounceComp() {
-    try { localStorage.setItem('looping-bounce-comp', String(Math.round(bounceCompMs * 10) / 10)); } catch (e) {}
+    try { localStorage.setItem('looping-bounce-comp-v2', String(Math.round(bounceCompMs * 10) / 10)); } catch (e) {}
   }
 
   /* pattern.chan: 0–15 = single MIDI channel, -1 = OMNI (broadcast on all 16) */
@@ -472,10 +476,13 @@
       internalSynth.setLoopRoute(true);
     }
     // External synth: widen the capture window by the measured MIDI/synth round trip
-    // so its late-arriving audio lands right. Internal synth has no such latency (its
-    // loop-route delay already matches comp), so don't add it — that would shift the
-    // audio early and leave silence at the end of the loop.
-    var extraComp = internal ? 0 : Math.round(bounceCompMs / 1000 * ed.engine.ctx.sampleRate);
+    // so its late-arriving audio lands right — but stop BOUNCE_SAFETY short so the
+    // window always keeps a little pre-roll and never starts mid-attack (which would
+    // clip the note's start and wrap it to the loop end). The post-hoc rotate then
+    // removes the residual lead-in. Internal synth has no such latency (its loop-route
+    // delay already matches comp), so don't add it.
+    var extraComp = internal ? 0 :
+      Math.max(0, Math.round((bounceCompMs / 1000 - BOUNCE_SAFETY) * ed.engine.ctx.sampleRate));
     ch.setComp(ed.engine.compFrames + extraComp);
     ch.sawNote = false; ch.lastMidiAbs = 0; ch.lastNoteOnAbs = 0;
     ch.pendingAction = 'record';
@@ -528,20 +535,46 @@
             if (m > peak) peak = m;
           }
           if (peak >= 0.003) {
-            var thr = Math.max(0.003, peak * 0.02);
-            var on = 0;
-            while (on < L.length && Math.abs(L[on]) < thr && Math.abs(R[on]) < thr) on++;
-            var shift = on - firstOn;
-            if (shift > 32 && shift < 0.35 * sr) {
-              rotate = shift;
-              bounceCompMs = Math.min(500, bounceCompMs + shift / sr * 1000);
+            // Robust onset: first sample that begins a sustained (~3 ms) run of energy
+            // above a low floor. A low threshold (an absolute floor or 1.5% of peak,
+            // whichever is larger) finds the *foot* of the attack — not 2% of the
+            // global peak, which lands well into a pad's swell and made the old rotate
+            // overshoot, wrapping the attack to the loop end. The hold window rejects
+            // stray clicks in the lead-in.
+            var thr = Math.max(0.0025, peak * 0.015);
+            var hold = Math.max(4, Math.round(sr * 0.003));
+            var on = -1;
+            for (i = 0; i < L.length; i++) {
+              if (Math.abs(L[i]) > thr || Math.abs(R[i]) > thr) {
+                var cnt = 0, kEnd = Math.min(L.length, i + hold);
+                for (var k = i; k < kEnd; k++) {
+                  if (Math.abs(L[k]) > thr || Math.abs(R[k]) > thr) cnt++;
+                }
+                if (cnt >= hold * 0.5) { on = i; break; }
+              }
+            }
+            if (on >= 0) {
+              // Refine to the true foot of the attack: walk back from the sustained
+              // point to the last near-silent sample, so we align the very start of
+              // the sound — not a point partway up the attack ramp.
+              var quiet = Math.max(0.0008, thr * 0.15);
+              var back = Math.max(0, on - Math.round(sr * 0.05));
+              while (on > back && (Math.abs(L[on - 1]) > quiet || Math.abs(R[on - 1]) > quiet)) on--;
+              var off = on - firstOn;   // audio onset relative to the first MIDI note (frames)
+              // Converge the remembered pre-roll toward leaving ~BOUNCE_SAFETY of
+              // capture head-room, correcting over- and under-compensation alike
+              // (damped 0.6 to avoid oscillation).
+              bounceCompMs = Math.max(0, Math.min(500,
+                bounceCompMs + (off / sr - BOUNCE_SAFETY) * 1000 * 0.6));
               saveBounceComp();
-              if (statusFn) statusFn('Bounce aligned: compensated ' + Math.round(shift / sr * 1000) +
-                ' ms MIDI/synth latency (remembered for next takes).');
-            } else if (shift < -32 && shift > -0.05 * sr) {
-              rotate = shift;
-              bounceCompMs = Math.max(0, bounceCompMs + shift / sr * 1000);
-              saveBounceComp();
+              // Rotate the take so the audio onset lands exactly on the first MIDI
+              // note. The rotate is circular — nothing is clipped, only the true
+              // silence between the last sound and the onset moves to the back.
+              if (off > 16 && off < 0.35 * sr || off < -16 && off > -0.1 * sr) {
+                rotate = off;
+                if (statusFn) statusFn('Bounce aligned: audio matched to the MIDI grid (' +
+                  Math.round(off / sr * 1000) + ' ms offset corrected).');
+              }
             }
           }
         }
