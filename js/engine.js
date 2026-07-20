@@ -473,7 +473,9 @@
     this.midiEvents = [];       // { off: frames-from-loop-start, data: [st,d1,d2] }
     this.midiMute = false;      // suppress looped MIDI output (e.g. after a sequencer bounce)
     this.midiTarget = 'ext';    // 'ext' = external MIDI port, 'int' = internal PRIZM synth
-    this.transpose = 0;         // semitones; audio shifts granularly, MIDI notes shift with it
+    this.transpose = 0;         // semitones; audio is re-pitched (audiojs), MIDI notes shift with it
+    this.origBuf = null;        // pristine (transpose 0) audio, cached to re-pitch from
+    this._transposeToken = 0;   // guards out-of-order async re-pitch renders
     this.oneShot = false;       // play once and stop instead of looping (live + song)
     this.seqPattern = null;     // sequencer pattern for this channel { bars, chan, notes }
     this.pendingMidi = [];      // { f: absolute frame, data } captured while rec/overdub
@@ -511,6 +513,10 @@
         self.loopSec = m.len / engine.ctx.sampleRate;
         self.anchorFrame = m.anchor;
         self.lenFrames = m.len;
+        // a new take or overdub replaces the audio → drop the transpose base
+        if (m.state === 'recording' || (prev !== 'overdubbing' && m.state === 'overdubbing')) {
+          self._clearTransposeBase();
+        }
         if (prev === 'recording' && m.state === 'playing') {
           if (m.perfecting) {
             // perfect pass may still trim the start — wait for the corrected
@@ -628,7 +634,7 @@
     this.pendingAction = null;
     this.armed = false;
     this.midiEvents = []; this.pendingMidi = []; this.midiUndo = null;
-    this.setTranspose(0);
+    this._clearTransposeBase();
   };
 
   /* Close the loop at an exact length. If that point is still in the future the close
@@ -670,6 +676,7 @@
       { cmd: 'replace', bufL: L.buffer, bufR: R.buffer, anchorDelta: anchorDelta || 0 },
       [L.buffer, R.buffer]
     );
+    this._clearTransposeBase();   // edited audio is the new un-pitched base
     return true;
   };
 
@@ -707,6 +714,7 @@
   };
   LoopChannel.prototype.undo = function () {
     this.node.port.postMessage({ cmd: 'undo' });
+    this._clearTransposeBase();
   };
   LoopChannel.prototype.setVolume = function (v) {
     this.gain.gain.setTargetAtTime(v, this.engine.ctx.currentTime, 0.01);
@@ -714,11 +722,52 @@
   LoopChannel.prototype.setComp = function (frames) {
     this.node.port.postMessage({ cmd: 'comp', value: frames });
   };
+  /* Transpose the loop. MIDI notes shift immediately (this.transpose). The audio is
+     re-pitched with the audiojs pitch-shift phase vocoder (tempo-locked), pre-rendered
+     from a cached pristine copy and swapped into the worklet. Falls back to the
+     worklet's granular shifter if the pitch-shift lib isn't present. */
   LoopChannel.prototype.setTranspose = function (semitones) {
     var st = Math.max(-24, Math.min(24, Math.round(semitones) || 0));
+    var prev = this.transpose;
     this.transpose = st;
-    this.node.port.postMessage({ cmd: 'transpose', value: st });
+    var PS = (typeof window !== 'undefined') && window.PitchShift;
+    if (!PS) { this.node.port.postMessage({ cmd: 'transpose', value: st }); return st; }
+    if (st !== prev) this._renderTranspose(st, prev);
     return st;
+  };
+
+  /* Drop the cached pristine buffer and reset transpose to 0 — used whenever the
+     loop's content is replaced by something other than a re-pitch (new take,
+     overdub, edit, undo), so the current worklet buffer becomes the new base. */
+  LoopChannel.prototype._clearTransposeBase = function () {
+    this.origBuf = null;
+    this._transposeToken++;
+    this.transpose = 0;
+  };
+
+  LoopChannel.prototype._renderTranspose = function (st, prev) {
+    var self = this, PS = window.PitchShift;
+    if (this.state !== 'playing' && this.state !== 'stopped') return;
+    var token = ++this._transposeToken;
+    var have = (this.origBuf && prev !== 0) ? Promise.resolve(this.origBuf)
+      : this.requestSnapshot().then(function (snap) {
+          if (!snap.len || !snap.bufL) return null;
+          self.origBuf = { L: new Float32Array(snap.bufL), R: new Float32Array(snap.bufR) };
+          return self.origBuf;
+        });
+    have.then(function (orig) {
+      if (token !== self._transposeToken || !orig) return;   // superseded or no audio
+      var L, R;
+      if (st === 0) {
+        L = new Float32Array(orig.L); R = new Float32Array(orig.R);
+        self.origBuf = null;
+      } else {
+        var res = PS.shift(orig.L, orig.R, st, self.engine.ctx.sampleRate);
+        L = res.L; R = res.R;
+      }
+      self.node.port.postMessage({ cmd: 'replace', bufL: L.buffer, bufR: R.buffer, anchorDelta: 0 },
+        [L.buffer, R.buffer]);
+    });
   };
   LoopChannel.prototype.setOneShot = function (on) {
     this.oneShot = !!on;

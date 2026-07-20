@@ -188,14 +188,26 @@
     return { slice: active, rate: Math.pow(2, (midiNote - this.root) / 12), control: false };
   };
 
-  /* Granular-shift a slice into a fresh AudioBuffer on `ctx` (tempo-locked). */
+  /* Pitch-shift a slice into a fresh AudioBuffer on `ctx`, keeping its length
+     (tempo-locked). Uses the audiojs pitch-shift phase vocoder when available and
+     the slice is long enough; falls back to the inline granular shifter otherwise
+     (short slices can't be phase-vocoded). */
   Choppah.prototype.shiftedSliceBuffer = function (ctx, sl, pitchRate) {
     var buf = this.buffer, sr = buf.sampleRate;
     var srcL = buf.getChannelData(0);
     var srcR = buf.numberOfChannels > 1 ? buf.getChannelData(1) : srcL;
     var n = sl.end - sl.start;
     var outBuf = ctx.createBuffer(2, n, sr);
-    granularShift(srcL, srcR, sl.start, sl.end, pitchRate, sr, outBuf.getChannelData(0), outBuf.getChannelData(1));
+    var PS = (typeof window !== 'undefined') && window.PitchShift;
+    if (PS && n >= PS.minLen) {
+      var segL = srcL.subarray(sl.start, sl.end);
+      var segR = srcR === srcL ? segL : srcR.subarray(sl.start, sl.end);
+      var res = PS.shiftRatio(segL, segR, pitchRate, sr);
+      outBuf.getChannelData(0).set(res.L);
+      outBuf.getChannelData(1).set(res.R);
+    } else {
+      granularShift(srcL, srcR, sl.start, sl.end, pitchRate, sr, outBuf.getChannelData(0), outBuf.getChannelData(1));
+    }
     return outBuf;
   };
 
@@ -371,7 +383,7 @@
         '<input type="file" class="chop-file" accept="audio/*" style="display:none">' +
         '<span class="chop-name">no sample</span>' +
         '<label class="seq-l">Slices <select class="chop-count">' +
-          '<option>2</option><option>4</option><option selected>8</option>' +
+          '<option value="1">1 (whole)</option><option>2</option><option>4</option><option selected>8</option>' +
           '<option>16</option><option>24</option><option>32</option></select></label>' +
         '<button class="chop-detect" title="Slice at detected transients">DETECT</button>' +
         '<label class="seq-l">Root <select class="chop-root"></select></label>' +

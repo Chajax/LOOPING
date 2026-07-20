@@ -1398,8 +1398,9 @@
     if (ch.state === 'empty') {
       strip.els.ring.setAttribute('stroke-dashoffset', RING_C);
       strip.els.time.textContent = '';
-      strip.els.pitch.value = ch.transpose;
     }
+    // keep the Pitch field in sync (transpose resets to 0 on new takes / edits)
+    if (document.activeElement !== strip.els.pitch) strip.els.pitch.value = ch.transpose;
   }
 
   function refreshPos(strip) {
