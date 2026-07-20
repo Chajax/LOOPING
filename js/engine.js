@@ -20,6 +20,7 @@
     '    this.state = "empty";',
     '    this.pending = null;',
     '    this.anchor = 0;',
+    '    this.stopPos = 0;   // frozen playhead position while stopped (pause/resume)',
     '    this.len = 0;',
     '    this.bufL = null; this.bufR = null;',
     '    this.undoL = null; this.undoR = null;',
@@ -42,7 +43,7 @@
     '      this.pending = { action: m.action, frame: m.frame, free: !!m.free, len: m.len || 0,',
     '        perfect: !!m.perfect, perfectTrim: !!m.perfectTrim, anchor: m.anchor || 0 };',
     '    } else if (m.cmd === "clear") {',
-    '      this.state = "empty"; this.pending = null;',
+    '      this.state = "empty"; this.pending = null; this.stopPos = 0;',
     '      this.bufL = this.bufR = this.undoL = this.undoR = null;',
     '      this.recL = this.recR = null; this.recLen = 0; this.len = 0;',
     '      this.recWinStart = this.recWinEnd = Infinity;',
@@ -65,7 +66,7 @@
     '      this.recWinStart = this.recWinEnd = Infinity;',
     '      this.perfectAt = Infinity; this.resetXf();',
     '      this.pending = null;',
-    '      this.state = "stopped";',
+    '      this.state = "stopped"; this.stopPos = 0;',
     '      this.sendState();',
     '    } else if (m.cmd === "rotate") {',
     '      // shift loop content earlier by m.frames (mod length), then re-fade the seam;',
@@ -161,15 +162,18 @@
     '      this.undoR = new Float32Array(this.bufR);',
     '      this.writeMode = "add";',
     '      this.recWinStart = frame; this.recWinEnd = Infinity;',
-    '      if (this.state === "stopped" && free) this.anchor = frame;',
+    '      // overdub from stopped resumes the frozen playhead too (top for free)',
+    '      if (this.state === "stopped") this.anchor = free ? frame : frame - this.stopPos;',
     '      this.state = "overdubbing";',
     '    } else if (a === "play") {',
     '      if (this.state === "overdubbing") {',
     '        this.recWinEnd = frame; this.state = "playing";',
     '        if (opt.perfect) { this.perfectTrim = false; this.setupTail(frame); this.perfectAt = frame + this.xfLen; }',
     '      } else if (this.state === "stopped" && this.bufL) {',
+    '        // pause semantics: resume from the frozen playhead (it did not advance',
+    '        // while stopped); explicit anchors (import/render/song) take precedence',
     '        if (opt.anchor) this.anchor = opt.anchor;',
-    '        else if (free) this.anchor = frame;',
+    '        else this.anchor = frame - this.stopPos;',
     '        this.state = "playing";',
     '      }',
     '    } else if (a === "stop") {',
@@ -177,9 +181,12 @@
     '        this.state = "empty"; this.recL = this.recR = null; this.recLen = 0;',
     '        this.recWinStart = this.recWinEnd = Infinity;',
     '      } else if (this.state === "overdubbing") {',
+    '        this.stopPos = this.len > 0 ? ((frame - this.anchor) % this.len + this.len) % this.len : 0;',
     '        this.recWinEnd = frame; this.state = "stopped";',
     '        if (opt.perfect) { this.perfectTrim = false; this.setupTail(frame); this.perfectAt = frame + this.xfLen; }',
     '      } else if (this.state === "playing") {',
+    '        // freeze the playhead where it stopped; play resumes from here',
+    '        this.stopPos = this.len > 0 ? ((frame - this.anchor) % this.len + this.len) % this.len : 0;',
     '        this.state = "stopped";',
     '      }',
     '    }',
@@ -844,16 +851,13 @@
   Engine.prototype.stopAll = function () {
     this.channels.forEach(function (c) { c.stop(); });
   };
-  /* Resume every stopped loop at one common frame (a shared downbeat).
-     Grid-length loops rejoin in phase with the master cycle; free-length loops
-     restart from their beginning on that downbeat. */
+  /* Resume every stopped loop at one common frame (a shared downbeat). Each loop
+     resumes from its frozen playhead, so loops that were stopped together come
+     back still aligned with each other; freshly loaded loops start from the top. */
   Engine.prototype.playAllAt = function (frame) {
-    var bf = this.transport.beatFrames();
     this.channels.forEach(function (c) {
       if (c.state !== 'stopped') return;
-      var beats = c.lenFrames / bf;
-      var gridLen = c.lenFrames > 0 && Math.abs(beats - Math.round(beats)) < 0.01;
-      var msg = { cmd: 'schedule', action: 'play', frame: frame, free: !gridLen };
+      var msg = { cmd: 'schedule', action: 'play', frame: frame, free: false };
       if (c.loadedNeedsAnchor) {
         msg.anchor = frame;
         c.loadedNeedsAnchor = false;
@@ -863,17 +867,14 @@
       if (c.onUpdate) c.onUpdate();
     });
   };
-  /* Play one channel at an explicit frame (song arranger). Grid loops rejoin in
-     phase; free loops restart at 0. No-op if already playing or nothing to play. */
+  /* Play one channel for the song arranger: anchor explicitly so the loop's top
+     lands on the pass start — arrangement blocks always show the loop from its
+     beginning, regardless of where its playhead froze. */
   LoopChannel.prototype.songPlayAt = function (frame) {
     if (this.state !== 'stopped') return;
-    var bf = this.engine.transport.beatFrames();
-    var beats = this.lenFrames / bf;
-    var gridLen = this.lenFrames > 0 && Math.abs(beats - Math.round(beats)) < 0.01;
-    var msg = { cmd: 'schedule', action: 'play', frame: frame, free: !gridLen };
-    if (this.loadedNeedsAnchor) { msg.anchor = frame; this.loadedNeedsAnchor = false; }
+    this.loadedNeedsAnchor = false;
     this.pendingAction = 'play';
-    this.node.port.postMessage(msg);
+    this.node.port.postMessage({ cmd: 'schedule', action: 'play', frame: frame, free: false, anchor: frame });
     if (this.onUpdate) this.onUpdate();
   };
   Engine.prototype.resetAll = function () {
