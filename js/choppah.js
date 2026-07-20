@@ -388,6 +388,7 @@
         '<button class="chop-detect" title="Slice at detected transients">DETECT</button>' +
         '<label class="seq-l">Root <select class="chop-root"></select></label>' +
         '<label class="chk chop-lock" title="Pitch-shift the slice without changing its length (granular time-stretch)"><input type="checkbox" class="chop-lock-in"> tempo-lock pitch</label>' +
+        '<label class="seq-l" title="Pitch-shift algorithm — applies to CHOPPAH re-pitch and the loop Pitch knob">Algo <select class="chop-algo"></select></label>' +
       '</div>' +
       '<canvas class="chop-canvas" height="150"></canvas>' +
       '<div class="chop-kbd">' +
@@ -409,6 +410,21 @@
     }
     rootSel.addEventListener('change', function () { self.root = parseInt(this.value, 10); });
     uiRoot.querySelector('.chop-lock-in').addEventListener('change', function () { self.tempoLock = this.checked; });
+
+    // pitch-shift algorithm selector (global — CHOPPAH re-pitch + loop transpose)
+    var algoSel = uiRoot.querySelector('.chop-algo');
+    var PS = (typeof window !== 'undefined') && window.PitchShift;
+    if (PS && PS.algorithms) {
+      PS.algorithms.forEach(function (a) {
+        var o = document.createElement('option');
+        o.value = a[0]; o.textContent = a[1];
+        algoSel.appendChild(o);
+      });
+      algoSel.value = PS.getAlgo();
+      algoSel.addEventListener('change', function () { PS.setAlgo(this.value); });
+    } else {
+      algoSel.disabled = true;
+    }
 
     var file = uiRoot.querySelector('.chop-file');
     uiRoot.querySelector('.chop-load').addEventListener('click', function () { file.click(); });

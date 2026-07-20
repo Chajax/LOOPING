@@ -51,16 +51,49 @@ var va=Object.create;var Vr=Object.defineProperty;var xa=Object.getOwnPropertyDe
     }
     delayCache[sr] = best; return best;
   }
-  /* scale = pitch ratio (2 = +octave). Input shorter than a frame can't be phase-
-     vocoded — caller should fall back. Returns a same-length Float32Array. */
-  function shiftMono(input, scale, sr) {
-    if (!PS || Math.abs(scale - 1) < 1e-6 || input.length < FRAME) return Float32Array.from(input);
+  /* audiojs phase vocoder — same-length repitch (needs at least one frame). */
+  function audiojsMono(input, scale, sr) {
+    if (!PS || input.length < FRAME) return granularMono(input, scale, sr);
     var delay = calibrate(sr);
     var out = new Float32Array(input.length + FRAME * 4);
     feedAll(scale, sr, input, out);
     var res = new Float32Array(input.length);
     for (var i = 0; i < input.length; i++) res[i] = out[i + delay] || 0;
     return res;
+  }
+
+  /* Granular overlap-add — two triangle-windowed grain streams read at `scale`
+     while output advances 1:1 (same length). Works at any length; smoother on
+     pads, softer on transients than the phase vocoder. */
+  function granularMono(input, scale, sr) {
+    var n = input.length;
+    var Gr = Math.min(2 * Math.round(sr * 0.04), n);
+    if (Gr < 8) return Float32Array.from(input);
+    var half = Gr * 0.5, out = new Float32Array(n);
+    for (var i = 0; i < n; i++) {
+      var a = 0;
+      for (var s = 0; s < 2; s++) {
+        var ph = (i + s * half) % Gr;
+        var rp = (i - ph) + ph * scale;
+        if (rp < 0) rp = 0; else if (rp > n - 1) rp = n - 1;
+        var w = 1 - Math.abs(2 * ph / Gr - 1);
+        var fl = Math.floor(rp), i1 = fl + 1 > n - 1 ? n - 1 : fl + 1, fr = rp - fl;
+        a += (input[fl] * (1 - fr) + input[i1] * fr) * w;
+      }
+      out[i] = a;
+    }
+    return out;
+  }
+
+  var ALGOS = { audiojs: audiojsMono, granular: granularMono };
+  var algo = 'audiojs';
+  try { var saved = localStorage.getItem('looping-pitch-algo'); if (saved && ALGOS[saved]) algo = saved; } catch (e) {}
+
+  /* scale = pitch ratio (2 = +octave). Returns a same-length Float32Array using
+     the currently selected algorithm. */
+  function shiftMono(input, scale, sr) {
+    if (Math.abs(scale - 1) < 1e-6) return Float32Array.from(input);
+    return (ALGOS[algo] || audiojsMono)(input, scale, sr);
   }
   function shiftRatio(L, R, scale, sr) {
     var oL = shiftMono(L, scale, sr);
@@ -71,6 +104,14 @@ var va=Object.create;var Vr=Object.defineProperty;var xa=Object.getOwnPropertyDe
     shiftMono: shiftMono,
     shiftRatio: shiftRatio,
     shift: function (L, R, semitones, sr) { return shiftRatio(L, R, Math.pow(2, semitones / 12), sr); },
-    minLen: FRAME
+    minLen: FRAME,
+    algorithms: [['audiojs', 'audiojs (phase vocoder)'], ['granular', 'granular (overlap-add)']],
+    getAlgo: function () { return algo; },
+    setAlgo: function (name) {
+      if (!ALGOS[name]) return algo;
+      algo = name;
+      try { localStorage.setItem('looping-pitch-algo', name); } catch (e) {}
+      return algo;
+    }
   };
 })();
