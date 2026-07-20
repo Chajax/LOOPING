@@ -198,15 +198,42 @@
       Math.max(50, (n.stopAt - ctx.currentTime) * 1000 + 200));
   };
 
+  /* DynamicsCompressorNode delays its output by a fixed lookahead (~256 frames
+     in Chrome). Measure it once per sample rate with an impulse render so
+     renderPattern can trim it — otherwise every rendered note would sit that
+     far behind the beat grid. */
+  var compLatency = {};   // sampleRate -> Promise<frames>
+  function compressorLatency(sr) {
+    if (!compLatency[sr]) {
+      var oc = new OfflineAudioContext(1, Math.round(sr * 0.1), sr);
+      var buf = oc.createBuffer(1, 8, sr);
+      buf.getChannelData(0)[0] = 1;
+      var src = oc.createBufferSource();
+      src.buffer = buf;
+      var comp = oc.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.knee.value = 20; comp.ratio.value = 6;
+      src.connect(comp); comp.connect(oc.destination);
+      src.start(0);
+      compLatency[sr] = oc.startRendering().then(function (out) {
+        var d = out.getChannelData(0);
+        for (var i = 0; i < d.length; i++) if (Math.abs(d[i]) > 1e-4) return i;
+        return 0;
+      });
+    }
+    return compLatency[sr];
+  }
+
   /* Render a pattern offline through an identical PRIZM chain — no real-time
      recording needed. notes = [{ pitch, vel(0..1), onT, offT }] in seconds from
-     loop start; lenSec = exact loop length. Release tails running past the end
-     are folded back onto the loop start, so the result loops seamlessly.
+     loop start; lenSec = exact loop length. The compressor's lookahead delay is
+     trimmed and release tails running past the end are folded back onto the
+     loop start, so the result sits on the grid and loops seamlessly.
      Resolves to { L, R } Float32Arrays of exactly the loop length. */
   Prizm.prototype.renderPattern = function (notes, lenSec) {
     var p = this.params;
     var sr = this.engine.ctx.sampleRate;
     var lenFrames = Math.round(lenSec * sr);
+    var outGain = this.out.gain.value;
     // total render length: loop + the longest release tail overhang
     var a = timeVal(p.atk, 3), r = timeVal(p.rel, 5);
     var maxEnd = lenSec;
@@ -215,29 +242,34 @@
       var e = relStart + r * 1.6 + 0.12;
       if (e > maxEnd) maxEnd = e;
     });
-    var oc = new OfflineAudioContext(2, Math.ceil(maxEnd * sr) + 64, sr);
-    var filter = oc.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = cutoffHz(p.cutoff);
-    filter.Q.value = 0.2 + p.res / 100 * 17;
-    var comp = oc.createDynamicsCompressor();
-    comp.threshold.value = -14; comp.knee.value = 20; comp.ratio.value = 6;
-    var out = oc.createGain();
-    out.gain.value = this.out.gain.value;
-    filter.connect(comp); comp.connect(out); out.connect(oc.destination);
-    notes.forEach(function (n) {
-      buildScheduledNote(oc, filter, p, n.pitch, n.vel, n.onT, n.offT);
-    });
-    return oc.startRendering().then(function (buf) {
-      var srcL = buf.getChannelData(0), srcR = buf.getChannelData(1);
-      var L = new Float32Array(lenFrames), R = new Float32Array(lenFrames);
-      L.set(srcL.subarray(0, lenFrames));
-      R.set(srcR.subarray(0, lenFrames));
-      for (var i = lenFrames; i < srcL.length; i++) {
-        var w = i % lenFrames;   // wrap the tail overhang onto the loop start
-        L[w] += srcL[i]; R[w] += srcR[i];
-      }
-      return { L: L, R: R };
+    return compressorLatency(sr).then(function (lat) {
+      var oc = new OfflineAudioContext(2, Math.ceil(maxEnd * sr) + lat + 64, sr);
+      var filter = oc.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = cutoffHz(p.cutoff);
+      filter.Q.value = 0.2 + p.res / 100 * 17;
+      var comp = oc.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.knee.value = 20; comp.ratio.value = 6;
+      var out = oc.createGain();
+      out.gain.value = outGain;
+      filter.connect(comp); comp.connect(out); out.connect(oc.destination);
+      notes.forEach(function (n) {
+        buildScheduledNote(oc, filter, p, n.pitch, n.vel, n.onT, n.offT);
+      });
+      return oc.startRendering();
+    }).then(function (buf) {
+      return compLatency[sr].then(function (lat) {
+        var srcL = buf.getChannelData(0), srcR = buf.getChannelData(1);
+        var L = new Float32Array(lenFrames), R = new Float32Array(lenFrames);
+        // read past the compressor's lookahead so onsets sit on the grid
+        L.set(srcL.subarray(lat, lat + lenFrames));
+        R.set(srcR.subarray(lat, lat + lenFrames));
+        for (var i = lat + lenFrames; i < srcL.length; i++) {
+          var w = (i - lat) % lenFrames;   // wrap the tail overhang onto the loop start
+          L[w] += srcL[i]; R[w] += srcR[i];
+        }
+        return { L: L, R: R };
+      });
     });
   };
 

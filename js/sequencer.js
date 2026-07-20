@@ -522,13 +522,18 @@
         if (ed) ed.status('Loop ' + label + ' is no longer empty — render discarded.');
         return;
       }
+      // Anchor explicitly to the next bar (starting the clock if needed) — never
+      // through ch.schedule(), whose per-loop quantize ('beat'/'off') would anchor
+      // off the bar grid and rotate the loop content against it.
+      var startF = ensureTransport();
       ch.node.port.postMessage({ cmd: 'load', bufL: res.L.buffer, bufR: res.R.buffer },
         [res.L.buffer, res.R.buffer]);
       ch.midiEvents = patternEvents(eng, pattern);
       ch.midiMute = !ui.loopOut.checked;
       ch.seqPattern = pattern;
-      ch.loadedNeedsAnchor = true;   // align the pattern start to the bar grid
-      ch.schedule('play');
+      ch.loadedNeedsAnchor = false;
+      ch.pendingAction = 'play';
+      ch.node.port.postMessage({ cmd: 'schedule', action: 'play', frame: startF, free: false, anchor: startF });
       if (ch.onUpdate) ch.onUpdate();
       if (ed) {
         ed.status('Loop ' + label + ' rendered from the pattern (' +
