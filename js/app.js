@@ -59,6 +59,8 @@
         new Promise(function (res) { setTimeout(function () { res(false); }, 8000); })
       ]);
 
+      if (window.FXDSP) window.FXDSP.load(engine.ctx);   // bitcrusher/freq-shift/pitch FX worklet
+
       drums = new window.DrumMachine(engine);
       drums.mountUI($('drum-grid'));
       wireDrums();
