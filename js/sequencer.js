@@ -135,6 +135,7 @@
           '<button class="seq-preview" title="Loop the pattern to the MIDI port (no recording)">PREVIEW</button>' +
           '<button class="seq-stop">STOP</button>' +
           '<button class="ed-apply seq-rec" title="Play the pattern once and record the synth into this loop channel">⏺ REC LOOP</button>' +
+          '<button class="ed-apply seq-render hidden" title="Render the pattern offline with the internal synth and load it into this loop — instant, sample-exact, no recording">⚡ RENDER MIDI</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -167,7 +168,9 @@
       loopOut: overlay.querySelector('.seq-loopout input'),
       stepBtn: overlay.querySelector('.seq-step'),
       backBtn: overlay.querySelector('.seq-back'),
-      restBtn: overlay.querySelector('.seq-rest')
+      restBtn: overlay.querySelector('.seq-rest'),
+      recBtn: overlay.querySelector('.seq-rec'),
+      renderBtn: overlay.querySelector('.seq-render')
     };
 
     overlay.querySelector('.seq-close').addEventListener('click', close);
@@ -188,6 +191,7 @@
     ui.target.addEventListener('change', function () {
       if (!ed) return;
       ed.ch.midiTarget = this.value;
+      syncTargetUI();
       if (this.value === 'int' && !internalSynth) ed.status('Internal synth unavailable.');
       else ed.status(this.value === 'int' ? 'This loop\'s MIDI plays the internal PRIZM synth.' : 'This loop\'s MIDI plays the external MIDI port.');
     });
@@ -201,6 +205,7 @@
     overlay.querySelector('.seq-preview').addEventListener('click', startPreview);
     overlay.querySelector('.seq-stop').addEventListener('click', stopPlayback);
     overlay.querySelector('.seq-rec').addEventListener('click', startBounce);
+    ui.renderBtn.addEventListener('click', startBounce);   // internal target renders offline
     ui.stepBtn.addEventListener('click', toggleStepRec);
     ui.backBtn.addEventListener('click', function () { if (stepRec.on) stepBack(); });
     ui.restBtn.addEventListener('click', function () { if (stepRec.on) stepAdvance(); });
@@ -435,6 +440,14 @@
 
   function endStepRec() {
     if (stepRec.on) { stepRec.on = false; ui.stepBtn.classList.remove('active'); }
+  }
+
+  /* Internal synth target: swap ⏺ REC LOOP for ⚡ RENDER MIDI (the pattern is
+     rendered offline — nothing is actually recorded). */
+  function syncTargetUI() {
+    var internal = ui.target.value === 'int';
+    ui.recBtn.classList.toggle('hidden', internal);
+    ui.renderBtn.classList.toggle('hidden', !internal);
   }
 
   function targetReady() {
@@ -811,6 +824,7 @@
     if (!ui.bars.value) { ui.bars.value = '2'; ed.pattern.bars = 2; }
     ui.chan.value = String(ed.pattern.chan);
     ui.target.value = ch.midiTarget || 'ext';
+    syncTargetUI();
     ui.overlay.classList.remove('hidden');
     ui.canvas.width = ui.canvas.clientWidth || 900;
     ui.canvas.height = ui.canvas.clientHeight || 392;
